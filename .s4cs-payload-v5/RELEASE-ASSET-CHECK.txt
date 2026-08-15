@@ -1,0 +1,1 @@
+Checking whether connector-supported release assets can replace remaining text chunks. Do not treat this file as product source.
