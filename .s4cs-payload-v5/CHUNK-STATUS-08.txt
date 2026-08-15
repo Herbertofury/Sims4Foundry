@@ -1,0 +1,1 @@
+Part08 payload transfer is the next durable checkpoint. This marker is separate from the payload data so progress remains visible if the stream is interrupted.
