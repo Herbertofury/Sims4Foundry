@@ -1,0 +1,1 @@
+Do not restart this publication from scratch after an interrupted stream. Continue from the highest successfully committed payload part.
