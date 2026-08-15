@@ -1,0 +1,75 @@
+name: S4CS Create Test Release
+
+on:
+  push:
+    branches: [s4cs-payload-check]
+    paths:
+      - '.github/workflows/s4cs-create-test-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: v0.1.0-alpha.11
+    steps:
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Wait for verified Alpha11 main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          for i in $(seq 1 36); do
+            rm -rf "$RUNNER_TEMP/release-src"
+            if git clone --depth 1 --branch main "$remote" "$RUNNER_TEMP/release-src" >/dev/null 2>&1; then
+              if grep -Fq '"version": "0.1.0-alpha.11"' "$RUNNER_TEMP/release-src/package.json" 2>/dev/null; then
+                count="$(find "$RUNNER_TEMP/release-src/wiki" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+                if test "$count" = '14'; then
+                  exit 0
+                fi
+              fi
+            fi
+            sleep 5
+          done
+          echo 'Verified Alpha11 main was not available in time.' >&2
+          exit 1
+
+      - name: Smoke-test published main
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/release-src"
+          npm run build
+          npm test
+
+      - name: Create exact test ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/release-src"
+          git archive --format=zip --output="$RUNNER_TEMP/Sims4CreatorStudio-v0.1.0-alpha.11.zip" HEAD
+          sha256sum "$RUNNER_TEMP/Sims4CreatorStudio-v0.1.0-alpha.11.zip" > "$RUNNER_TEMP/Sims4CreatorStudio-v0.1.0-alpha.11-SHA256SUMS.txt"
+
+      - name: Create or update GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/release-src"
+          if ! git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            git fetch origin --tags --force
+          fi
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title 'Sims 4 Creator Studio v0.1.0-alpha.11' --notes 'Verified Alpha11 test build. Source on main has passed build and automated test validation.' --prerelease
+          fi
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/Sims4CreatorStudio-v0.1.0-alpha.11.zip" "$RUNNER_TEMP/Sims4CreatorStudio-v0.1.0-alpha.11-SHA256SUMS.txt" --repo "$GITHUB_REPOSITORY" --clobber
