@@ -1,0 +1,83 @@
+name: Recover verified S4CS Alpha11 from Drive
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/s4cs-drive-recover-alpha11.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  recover-and-publish:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_SHA: aa011d208d65dca1ad38bd83302fa05364e51800
+      RELEASE_TAG: v0.1.0-alpha.11
+      DRIVE_BUNDLE_ID: 1YiwAclxwY4VHAuIsff12GrW4_Xa8MPYw
+      BUNDLE_SHA256: 3b3a7cccf44caa42a645e0aa6c6ef2bf7309fc156ad9ec79377e95cab4be6b41
+      BUNDLE_SIZE: '6374056'
+    steps:
+      - name: Check out publication staging branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Fetch exact verified Git bundle from Drive
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet 'gdown>=5,<6'
+          bundle="$RUNNER_TEMP/Sims4CreatorStudio-v0.1.0-alpha.11.git.bundle"
+          gdown --fuzzy "https://drive.google.com/file/d/${DRIVE_BUNDLE_ID}/view" -O "$bundle"
+          test "$(stat -c %s "$bundle")" = "$BUNDLE_SIZE"
+          echo "$BUNDLE_SHA256  $bundle" | sha256sum -c -
+          git bundle verify "$bundle"
+          echo "bundle=$bundle" >> "$GITHUB_ENV"
+
+      - name: Recover exact Alpha11 commit and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch "$bundle" 'refs/heads/main:refs/remotes/s4cs-bundle/main'
+          git fetch "$bundle" 'refs/tags/v0.1.0-alpha.11:refs/tags/v0.1.0-alpha.11' || true
+          test "$(git rev-parse refs/remotes/s4cs-bundle/main)" = "$SOURCE_SHA"
+          test "$(git rev-parse "$SOURCE_SHA")" = "$SOURCE_SHA"
+          test "$(git ls-tree -r --name-only "$SOURCE_SHA" | wc -l | tr -d ' ')" = '248'
+          git show "$SOURCE_SHA:package.json" | grep -Fq '"version": "0.1.0-alpha.11"'
+          test "$(git ls-tree -r --name-only "$SOURCE_SHA" wiki | grep -c '\.md$')" = '14'
+
+      - name: Test exact recovered source before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/s4cs-alpha11"
+          rm -rf "$src"
+          git worktree add --detach "$src" "$SOURCE_SHA"
+          cd "$src"
+          npm run build
+          npm test
+          npm run corruption
+          npm run stress
+
+      - name: Publish exact source and release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")" = "$SOURCE_SHA"
+          else
+            git tag -a "$RELEASE_TAG" "$SOURCE_SHA" -m 'Sims 4 Creator Studio v0.1.0-alpha.11'
+          fi
+          git push origin "$SOURCE_SHA:refs/heads/main" --force
+          git push origin "refs/tags/$RELEASE_TAG" --force
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$SOURCE_SHA"
+          test "$(git ls-remote origin "refs/tags/$RELEASE_TAG^{}" | awk '{print $1}')" = "$SOURCE_SHA"
