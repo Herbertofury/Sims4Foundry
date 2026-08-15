@@ -1,0 +1,1 @@
+Temporary bootstrap transfer area. This directory will be removed automatically after the verified alpha.11 snapshot is reconstructed.
