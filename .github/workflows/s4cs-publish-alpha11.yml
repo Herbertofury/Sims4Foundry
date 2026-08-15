@@ -1,0 +1,81 @@
+name: S4CS Alpha11 Atomic Publish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/s4cs-publish-alpha11.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out bootstrap branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify staged Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE='.s4cs-bootstrap/Sims4CreatorStudio-v0.1.0-alpha.11.git.bundle'
+          test -f "$BUNDLE"
+          echo '3b3a7cccf44caa42a645e0aa6c6ef2bf7309fc156ad9ec79377e95cab4be6b41  '"$BUNDLE" | sha256sum -c -
+          git bundle verify "$BUNDLE"
+
+      - name: Restore exact verified main and release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE="$GITHUB_WORKSPACE/.s4cs-bootstrap/Sims4CreatorStudio-v0.1.0-alpha.11.git.bundle"
+          git fetch "$BUNDLE" 'refs/heads/main:refs/remotes/s4cs-bundle/main'
+          git fetch "$BUNDLE" 'refs/tags/v0.1.0-alpha.11:refs/tags/v0.1.0-alpha.11'
+          SOURCE_SHA="$(git rev-parse refs/remotes/s4cs-bundle/main)"
+          test "$SOURCE_SHA" = 'aa011d208d65dca1ad38bd83302fa05364e51800'
+          test "$(git rev-parse refs/tags/v0.1.0-alpha.11^{})" = 'aa011d208d65dca1ad38bd83302fa05364e51800'
+          git push origin "$SOURCE_SHA:refs/heads/main" --force
+          git push origin refs/tags/v0.1.0-alpha.11 --force
+
+      - name: Verify published remote refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags --force
+          test "$(git rev-parse origin/main)" = 'aa011d208d65dca1ad38bd83302fa05364e51800'
+          test "$(git rev-parse refs/tags/v0.1.0-alpha.11^{})" = 'aa011d208d65dca1ad38bd83302fa05364e51800'
+
+      - name: Publish hosted Wiki when the private Wiki endpoint is enabled
+        id: wiki
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/s4cs-wiki
+          mkdir -p /tmp/s4cs-wiki
+          cp "$GITHUB_WORKSPACE"/wiki/*.md /tmp/s4cs-wiki/
+          cd /tmp/s4cs-wiki
+          git init -b master
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .
+          git commit -m 'Publish S4CS alpha.11 Wiki'
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+          git push origin master --force
+
+      - name: Publication summary
+        shell: bash
+        run: |
+          {
+            echo '### S4CS alpha.11 publication'
+            echo '- main: aa011d208d65dca1ad38bd83302fa05364e51800'
+            echo '- tag: v0.1.0-alpha.11'
+            echo '- verified Git bundle SHA-256: 3b3a7cccf44caa42a645e0aa6c6ef2bf7309fc156ad9ec79377e95cab4be6b41'
+            echo "- hosted Wiki push outcome: ${{ steps.wiki.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"
