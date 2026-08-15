@@ -1,0 +1,122 @@
+name: S4CS Alpha11 ZIP Fallback Recovery
+
+on:
+  push:
+    branches: [s4cs-payload-check]
+    paths:
+      - '.github/workflows/s4cs-drive-zip-fallback.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: v0.1.0-alpha.11
+      DRIVE_ZIP_ID: 1a9RS5T8rbtC0pqt7qQ1ICPEdb5XcV0mp
+      ZIP_SHA256: 198c021c70b642fecc4b5e6b78579110ad6490b277c9bbfcfd75dac4302c37a1
+      ZIP_SIZE: '6523082'
+    steps:
+      - name: Check out fallback branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Stop if Alpha11 is already fully published
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --force
+          if git show origin/main:package.json 2>/dev/null | grep -Fq '"version": "0.1.0-alpha.11"'; then
+            count="$(git ls-tree -r --name-only origin/main wiki 2>/dev/null | grep -c '\.md$' || true)"
+            if test "$count" = '14'; then
+              echo 'Alpha11 source is already present on main; fallback is unnecessary.'
+              echo 'already_published=1' >> "$GITHUB_ENV"
+              exit 0
+            fi
+          fi
+          echo 'already_published=0' >> "$GITHUB_ENV"
+
+      - name: Try direct Google Drive ZIP download endpoints
+        if: env.already_published != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip="$RUNNER_TEMP/Sims4CreatorStudio-v0.1.0-alpha.11.zip"
+          urls=(
+            "https://drive.usercontent.google.com/download?id=${DRIVE_ZIP_ID}&export=download&confirm=t"
+            "https://drive.google.com/uc?export=download&confirm=t&id=${DRIVE_ZIP_ID}"
+            "https://drive.google.com/uc?export=download&id=${DRIVE_ZIP_ID}"
+          )
+          ok=0
+          for url in "${urls[@]}"; do
+            rm -f "$zip"
+            if curl --fail --location --retry 2 --max-time 90 "$url" -o "$zip"; then
+              if test "$(stat -c %s "$zip")" = "$ZIP_SIZE" && echo "$ZIP_SHA256  $zip" | sha256sum -c -; then
+                ok=1
+                break
+              fi
+            fi
+          done
+          test "$ok" = 1
+          unzip -t "$zip"
+          echo "zip=$zip" >> "$GITHUB_ENV"
+
+      - name: Extract and verify Alpha11 source
+        if: env.already_published != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/s4cs-alpha11-zip"
+          rm -rf "$src"
+          mkdir -p "$src"
+          unzip -q "$zip" -d "$src"
+          root="$src"
+          if test ! -f "$root/package.json"; then
+            candidate="$(find "$src" -mindepth 1 -maxdepth 2 -type f -name package.json -print -quit)"
+            test -n "$candidate"
+            root="$(dirname "$candidate")"
+          fi
+          grep -Fq '"version": "0.1.0-alpha.11"' "$root/package.json"
+          test "$(find "$root/wiki" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')" = '14'
+          echo "source_root=$root" >> "$GITHUB_ENV"
+
+      - name: Re-run release validation
+        if: env.already_published != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$source_root"
+          npm run build
+          npm test
+          npm run corruption
+          npm run stress
+
+      - name: Publish verified ZIP source to main
+        if: env.already_published != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$source_root"
+          rm -rf .git
+          git init -b publish
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Publish Sims 4 Creator Studio v0.1.0-alpha.11'
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:main --force
+          git tag -a "$RELEASE_TAG" -m 'Sims 4 Creator Studio v0.1.0-alpha.11'
+          git push origin "refs/tags/$RELEASE_TAG" --force
+          git fetch origin main --force
+          git show origin/main:package.json | grep -Fq '"version": "0.1.0-alpha.11"'
