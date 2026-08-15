@@ -1,0 +1,1 @@
+Probing connector-native GitHub release upload support as a replacement for remaining base64 payload fragments.
