@@ -1,0 +1,1 @@
+Direct-push recovery is now the preferred path; keep all prior payload-part commits untouched until the exact Alpha11 main branch is verified.
