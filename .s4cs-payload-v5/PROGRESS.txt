@@ -1,0 +1,1 @@
+Checkpoint mode active. Parts 00-07 were confirmed staged before this marker. Remaining payload is being added in small commits before the publish/test action.
