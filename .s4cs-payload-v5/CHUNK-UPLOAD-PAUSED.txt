@@ -1,0 +1,1 @@
+Payload chunk transfer is paused while a direct authenticated Git push path is tested. Existing chunks remain durable.
