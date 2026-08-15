@@ -1,0 +1,1 @@
+Each payload fragment is intentionally committed separately to make upload progress durable across interrupted message streams.
