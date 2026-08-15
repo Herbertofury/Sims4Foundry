@@ -1,0 +1,1 @@
+Upload continuity checkpoint: use separate payload commits and resume from the highest successfully committed part; do not restart the Alpha11 transfer.
