@@ -1,0 +1,1 @@
+If connector text transfer becomes the bottleneck, use a temporary write-capable repository deploy key for a direct authenticated git push from the verified local checkout, then remove the key after remote verification.
