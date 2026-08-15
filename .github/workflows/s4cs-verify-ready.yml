@@ -1,0 +1,98 @@
+name: S4CS Verify Ready
+
+on:
+  push:
+    branches: [s4cs-payload-check]
+    paths:
+      - '.github/workflows/s4cs-verify-ready.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: v0.1.0-alpha.11
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Wait briefly for recovery publication and clone main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          for i in $(seq 1 24); do
+            rm -rf "$RUNNER_TEMP/verify"
+            if git clone --depth 1 --branch main "$remote" "$RUNNER_TEMP/verify" >/dev/null 2>&1; then
+              if grep -Fq '"version": "0.1.0-alpha.11"' "$RUNNER_TEMP/verify/package.json" 2>/dev/null; then
+                count="$(find "$RUNNER_TEMP/verify/wiki" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+                if test "$count" = '14'; then
+                  exit 0
+                fi
+              fi
+            fi
+            sleep 5
+          done
+          echo 'Alpha11 source did not appear on main within the verification window.' >&2
+          exit 1
+
+      - name: Verify source structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/verify"
+          grep -Fq '"version": "0.1.0-alpha.11"' package.json
+          test "$(find wiki -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')" = '14'
+          test -f apps/studio-web/src/core/tuning-graph.ts
+          test -f apps/studio-web/src/core/batch-doctor.ts
+          grep -Fq 'findTuningExamples' apps/studio-web/src/core/tuning-graph.ts
+          grep -Fq 'assessCreatorRelease' apps/studio-web/src/core/batch-doctor.ts
+          grep -Fq 'buildCreatorReleaseKit' apps/studio-web/src/core/batch-doctor.ts
+
+      - name: Run build and full automated regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/verify"
+          npm run build
+          npm test
+          npm run corruption
+          npm run stress
+
+      - name: Ensure Alpha11 release tag exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/verify"
+          git fetch origin --tags --force
+          if ! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git tag -a "$RELEASE_TAG" HEAD -m 'Sims 4 Creator Studio v0.1.0-alpha.11'
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
+
+      - name: Package verified test source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          tar --exclude='.git' -czf Sims4CreatorStudio-v0.1.0-alpha.11-github-test-source.tar.gz -C verify .
+
+      - name: Upload verification artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sims4CreatorStudio-v0.1.0-alpha.11-github-test-source
+          path: ${{ runner.temp }}/Sims4CreatorStudio-v0.1.0-alpha.11-github-test-source.tar.gz
+          if-no-files-found: error
+          retention-days: 7
