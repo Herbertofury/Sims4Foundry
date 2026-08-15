@@ -1,0 +1,1 @@
+Small-commit transfer is still active. The next required binary payload fragment is part08.b64.
