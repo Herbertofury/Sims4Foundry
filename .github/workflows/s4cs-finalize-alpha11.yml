@@ -1,0 +1,122 @@
+name: S4CS Alpha11 Finalize Publication
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/s4cs-finalize-alpha11.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_SHA: aa011d208d65dca1ad38bd83302fa05364e51800
+      RELEASE_TAG: v0.1.0-alpha.11
+      BUNDLE_PATH: .s4cs-bootstrap/Sims4CreatorStudio-v0.1.0-alpha.11.git.bundle
+      BUNDLE_SHA256: 3b3a7cccf44caa42a645e0aa6c6ef2bf7309fc156ad9ec79377e95cab4be6b41
+    steps:
+      - name: Check out current private repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Recover verified source commit if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "${SOURCE_SHA}^{commit}" 2>/dev/null; then
+            test -f "$BUNDLE_PATH"
+            echo "${BUNDLE_SHA256}  ${BUNDLE_PATH}" | sha256sum -c -
+            git bundle verify "$BUNDLE_PATH"
+            git fetch "$BUNDLE_PATH" 'refs/heads/main:refs/remotes/s4cs-bundle/main'
+          fi
+          test "$(git rev-parse "$SOURCE_SHA")" = "$SOURCE_SHA"
+
+      - name: Verify exact alpha.11 source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-tree -r --name-only "$SOURCE_SHA" | wc -l | tr -d ' ')" = '248'
+          git show "$SOURCE_SHA:package.json" | grep -Fq '"version": "0.1.0-alpha.11"'
+          test "$(git ls-tree -r --name-only "$SOURCE_SHA" wiki | grep -c '\.md$')" = '14'
+          git show "$SOURCE_SHA:apps/studio-web/src/core/tuning-graph.ts" | grep -Fq 'findTuningExamples'
+          git show "$SOURCE_SHA:apps/studio-web/src/core/batch-doctor.ts" | grep -Fq 'assessCreatorRelease'
+          git show "$SOURCE_SHA:apps/studio-web/src/core/batch-doctor.ts" | grep -Fq 'buildCreatorReleaseKit'
+          git show "$SOURCE_SHA:README.md" | grep -Fq 'Alpha11'
+
+      - name: Ensure release tag points to verified alpha.11
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --force
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            if test "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")" != "$SOURCE_SHA"; then
+              git tag -d "$RELEASE_TAG"
+              git tag -a "$RELEASE_TAG" "$SOURCE_SHA" -m 'Sims 4 Creator Studio v0.1.0-alpha.11'
+            fi
+          else
+            if test -f "$BUNDLE_PATH"; then
+              git fetch "$BUNDLE_PATH" "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" || true
+            fi
+            if ! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+              git tag -a "$RELEASE_TAG" "$SOURCE_SHA" -m 'Sims 4 Creator Studio v0.1.0-alpha.11'
+            fi
+          fi
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")" = "$SOURCE_SHA"
+          git push origin "refs/tags/$RELEASE_TAG" --force
+
+      - name: Remove accidental temporary branch if present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin "$RELEASE_TAG" >/dev/null 2>&1; then
+            git push origin --delete "$RELEASE_TAG"
+          fi
+
+      - name: Publish hosted Wiki from the verified 14-page manual
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/s4cs-wiki-src /tmp/s4cs-wiki-repo
+          mkdir -p /tmp/s4cs-wiki-src /tmp/s4cs-wiki-repo
+          git archive "$SOURCE_SHA" wiki | tar -x -C /tmp/s4cs-wiki-src
+          test "$(find /tmp/s4cs-wiki-src/wiki -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')" = '14'
+
+          WIKI_URL="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+          if git ls-remote "$WIKI_URL" >/dev/null 2>&1; then
+            git clone "$WIKI_URL" /tmp/s4cs-wiki-repo
+          else
+            git -C /tmp/s4cs-wiki-repo init -b master
+          fi
+
+          find /tmp/s4cs-wiki-repo -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp /tmp/s4cs-wiki-src/wiki/*.md /tmp/s4cs-wiki-repo/
+          git -C /tmp/s4cs-wiki-repo config user.name 'github-actions[bot]'
+          git -C /tmp/s4cs-wiki-repo config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C /tmp/s4cs-wiki-repo add -A
+          if ! git -C /tmp/s4cs-wiki-repo diff --cached --quiet; then
+            git -C /tmp/s4cs-wiki-repo commit -m 'Publish S4CS alpha.11 Wiki'
+          fi
+          if ! git -C /tmp/s4cs-wiki-repo remote get-url origin >/dev/null 2>&1; then
+            git -C /tmp/s4cs-wiki-repo remote add origin "$WIKI_URL"
+          fi
+          git -C /tmp/s4cs-wiki-repo push origin HEAD:master --force
+
+      - name: Always restore exact verified main
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "${SOURCE_SHA}^{commit}" 2>/dev/null && test -f "$BUNDLE_PATH"; then
+            git fetch "$BUNDLE_PATH" 'refs/heads/main:refs/remotes/s4cs-bundle/main'
+          fi
+          test "$(git rev-parse "$SOURCE_SHA")" = "$SOURCE_SHA"
+          git push origin "$SOURCE_SHA:refs/heads/main" --force
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$SOURCE_SHA"
