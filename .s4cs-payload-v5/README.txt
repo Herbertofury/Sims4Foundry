@@ -1,0 +1,1 @@
+Checkpointed payload staging for verified Sims 4 Creator Studio Alpha11. Payload chunks are committed separately so interrupted chat turns do not lose completed upload progress.
