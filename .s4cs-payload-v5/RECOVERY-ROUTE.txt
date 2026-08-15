@@ -1,0 +1,1 @@
+Attempting connector-supported repository credential/deploy-key recovery only if the GitHub connector exposes a reversible key action.
