@@ -1,0 +1,1 @@
+Temporary direct-push recovery path may use a removable repository deploy key only if needed; any such key must be removed immediately after the verified publication.
