@@ -1,0 +1,1 @@
+A temporary direct Git push recovery path is being attempted from the verified local Alpha11 checkout. Existing payload parts remain durable until remote verification.
