@@ -1,0 +1,107 @@
+name: S4CS Encrypted Bundle Recovery
+
+on:
+  push:
+    branches: [s4cs-payload-check]
+    paths:
+      - '.github/workflows/s4cs-encrypted-bundle-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  recover-test-publish:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_SHA: aa011d208d65dca1ad38bd83302fa05364e51800
+      RELEASE_TAG: v0.1.0-alpha.11
+      BUNDLE_SHA256: 3b3a7cccf44caa42a645e0aa6c6ef2bf7309fc156ad9ec79377e95cab4be6b41
+      ENC_URL: https://filebin.net/s4cs-a11-f6c4a09e1a0b4c8e/Sims4CreatorStudio-v0.1.0-alpha.11.git.bundle.enc
+      ENC_PASS: n4tF8Qz2Vw7LxC9pR6mK3dH5sJ1uB0eG8yN6aP4cT2vW7xQ9
+    steps:
+      - name: Check out recovery branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download and decrypt exact verified Alpha11 Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          enc="$RUNNER_TEMP/s4cs-alpha11.bundle.enc"
+          bundle="$RUNNER_TEMP/Sims4CreatorStudio-v0.1.0-alpha.11.git.bundle"
+          curl --fail --location --retry 5 --max-time 180 "$ENC_URL" -o "$enc"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$enc" -out "$bundle" -pass pass:"$ENC_PASS"
+          echo "$BUNDLE_SHA256  $bundle" | sha256sum -c -
+          git bundle verify "$bundle"
+          echo "bundle=$bundle" >> "$GITHUB_ENV"
+
+      - name: Recover exact source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/s4cs-alpha11"
+          rm -rf "$src"
+          git clone "$bundle" "$src"
+          cd "$src"
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git ls-tree -r --name-only HEAD | wc -l | tr -d ' ')" = '248'
+          test "$(git ls-tree -r --name-only HEAD wiki | grep -c '\.md$')" = '14'
+          grep -Fq '"version": "0.1.0-alpha.11"' package.json
+          grep -Fq 'findTuningExamples' apps/studio-web/src/core/tuning-graph.ts
+          grep -Fq 'assessCreatorRelease' apps/studio-web/src/core/batch-doctor.ts
+          grep -Fq 'buildCreatorReleaseKit' apps/studio-web/src/core/batch-doctor.ts
+
+      - name: Run full automated release validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/s4cs-alpha11"
+          npm run build
+          npm test
+          npm run corruption
+          npm run stress
+
+      - name: Publish exact verified Alpha11 main and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/s4cs-alpha11"
+          git remote remove origin || true
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "$SOURCE_SHA:refs/heads/main" --force
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")" = "$SOURCE_SHA"
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git tag -a "$RELEASE_TAG" "$SOURCE_SHA" -m 'Sims 4 Creator Studio v0.1.0-alpha.11'
+          fi
+          git push origin "refs/tags/$RELEASE_TAG" --force
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$SOURCE_SHA"
+          test "$(git ls-remote origin "refs/tags/$RELEASE_TAG^{}" | awk '{print $1}')" = "$SOURCE_SHA"
+
+      - name: Build downloadable verified test artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/s4cs-alpha11"
+          git archive --format=zip --output="$RUNNER_TEMP/Sims4CreatorStudio-v0.1.0-alpha.11-github-test.zip" "$SOURCE_SHA"
+
+      - name: Upload verified test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sims4CreatorStudio-v0.1.0-alpha.11-github-test
+          path: ${{ runner.temp }}/Sims4CreatorStudio-v0.1.0-alpha.11-github-test.zip
+          if-no-files-found: error
+          retention-days: 7
