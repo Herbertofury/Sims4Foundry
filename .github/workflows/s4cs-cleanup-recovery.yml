@@ -1,0 +1,67 @@
+name: S4CS Cleanup Recovery Staging
+
+on:
+  push:
+    branches: [s4cs-payload-check]
+    paths:
+      - '.github/workflows/s4cs-cleanup-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: v0.1.0-alpha.11
+      ENC_BIN_URL: https://filebin.net/s4cs-a11-f6c4a09e1a0b4c8e
+    steps:
+      - name: Wait for published source and test release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          for i in $(seq 1 60); do
+            main_ok=0
+            release_ok=0
+            rm -rf "$RUNNER_TEMP/check"
+            if git clone --depth 1 --branch main "$remote" "$RUNNER_TEMP/check" >/dev/null 2>&1; then
+              if grep -Fq '"version": "0.1.0-alpha.11"' "$RUNNER_TEMP/check/package.json" 2>/dev/null && test "$(find "$RUNNER_TEMP/check/wiki" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')" = '14'; then
+                main_ok=1
+              fi
+            fi
+            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              release_ok=1
+            fi
+            if test "$main_ok" = 1 && test "$release_ok" = 1; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Publication/release was not fully ready; keeping recovery branches for resumption.' >&2
+          exit 1
+
+      - name: Remove temporary encrypted transfer bin when supported
+        shell: bash
+        run: |
+          curl --fail --silent --show-error -X DELETE "$ENC_BIN_URL" >/dev/null 2>&1 || true
+
+      - name: Remove obsolete recovery branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git init "$RUNNER_TEMP/cleanup-repo"
+          cd "$RUNNER_TEMP/cleanup-repo"
+          git remote add origin "$remote"
+          if git ls-remote --exit-code --heads origin s4cs-bootstrap >/dev/null 2>&1; then
+            git push origin --delete s4cs-bootstrap
+          fi
+          if git ls-remote --exit-code --heads origin s4cs-payload-check >/dev/null 2>&1; then
+            git push origin --delete s4cs-payload-check
+          fi
