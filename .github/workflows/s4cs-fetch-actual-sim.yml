@@ -1,0 +1,30 @@
+name: S4CS Actual Sim Fixture Fetch
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  fetch:
+    if: contains(github.event.head_commit.message, 'Fetch verified actual Sim preview fixtures')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and verify exact pinned Sims 4 body/head
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p actual-sim
+          base='https://raw.githubusercontent.com/CmarNYC-Tools/TS4SimRipper/862a32949e5156b371e2d2f83de4e37e0bb1afcc/src/Resources'
+          curl --fail --location --retry 3 "$base/yfBodyComplete_lod0.simgeom" -o actual-sim/yfBodyComplete_lod0.simgeom
+          curl --fail --location --retry 3 "$base/yfHead_lod0.simgeom" -o actual-sim/yfHead_lod0.simgeom
+          test "$(stat -c %s actual-sim/yfBodyComplete_lod0.simgeom)" = 229720
+          test "$(stat -c %s actual-sim/yfHead_lod0.simgeom)" = 150958
+          test "$(git hash-object actual-sim/yfBodyComplete_lod0.simgeom)" = b1ba20c4a2df383bd37bfeeb99378c11b3cd3584
+          test "$(git hash-object actual-sim/yfHead_lod0.simgeom)" = a588beeb4733d73b6e00c4290da2a3d5c2ea4f8c
+      - name: Upload verified actual Sim fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: s4cs-actual-yf-lod0
+          path: actual-sim
+          if-no-files-found: error
+          retention-days: 1
