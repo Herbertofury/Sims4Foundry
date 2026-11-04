@@ -717,3 +717,75 @@ workflow plus default schema-3 sender denial before socket creation for both
 submit and receipt-read types. Actual Python 3.7 reference-header checks still
 pass. No companion is bundled or installed. Wheel SHA-256:
 a20d1f53fa715bd2eb51a3f51030a9c6eea45073d6b796603f6419c44f1e25ce.
+
+At request-bound Live head cedbe4d875140c7f88ed642fb33ad013ffaa13bb, all six
+Windows/Linux Python 3.11/3.13/3.14 jobs passed in both push and PR workflows.
+The inspected Windows 3.11 and 3.14 logs collected 1,043 tests with 13 skips.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41864583866
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41864591012
+
+At host-exchange/handoff head ff89a735d932542a5647ce19352ec0404fb693d9, all six
+jobs again passed in both workflows. The inspected Windows 3.11 and 3.14 PR logs
+collected 1,084 tests with 24 skips, including all 41 new exchange cases:
+30 passed and 11 optional actual-Python-3.7 cases skipped on those CI runners.
+Those 11 reference-child cases passed in the configured local suite. The PR
+remained draft at the matching head. These CI results do not complete the earlier
+independent owner/transport review or establish real-game qualification.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41868505101
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41868668874
+
+## Standalone companion build, owner lifecycle and exit observation
+
+Foundry has no required Apex runtime dependency. The earlier handoff's suggestion
+to rely on an Apex controller while waiting has been removed; historical commands
+remain clearly labeled source references. No Apex compatibility adapter was
+committed. The independent companion now has a deterministic archive builder and
+an explicit original-first owner-tick integration, rather than an Apex wrapper.
+
+The new owner runtime passes 37 tests on both current Python and actual isolated
+Python 3.7.17. Fabricated services and owned loopback exercise observation, clock
+speed, guarded CAS entry request, quit-menu request and the separate typed Live
+read. Tests cover original return/errors, nested and foreign-thread calls, one
+drain per tick, contention, later hook replacement, interrupted startup and
+cleanup uncertainty. Production admission, automatic startup, real UI semantics
+and current-game qualification are still missing. The separate earlier final
+independent owner/transport re-review remains incomplete; these tests do not
+replace it.
+
+The builder's 30 tests plus five CLI tests pass with the actual isolated compiler.
+Tests cover byte bounds, exact source allowlist, source/compiler pins, Windows
+path/descriptor timestamp differences, output collisions and incomplete two-file
+publication, descriptor failure, interrupted compiler startup and cleanup. The
+trusted compiler builds without executing candidate source. Its executable hash
+does not authenticate the rest of the compiler installation.
+
+The actual complete neutral archive was built twice through the CLI and compared
+byte-for-byte: 305,568 bytes, 24 source/bytecode members, SHA-256
+edd9d3dda9bad5f7999e858777f0d549738f5834fc5c7924b417ae06d8c9466b.
+All twelve modules also imported from that archive on isolated Python 3.7.17 with
+socket/thread startup and game/Apex imports guarded against. That separate import
+smoke test does not establish how the game loads or activates the archive. There
+is no automatic bootstrap, installation, production key or admitted game host.
+
+The new passive exit observer watches one retained exact process lifetime and
+does not send quit, save or input. Fifteen fake-handle/CLI tests pass; one newly
+owned Python-child Windows fixture is separately gated for hosted CI. A signalled
+process handle does not distinguish normal shutdown from crash or prove saving.
+Independent review reproduced a Unicode casefold collision, which was fixed by
+conservative ASCII-only case normalization. The same narrow correction was
+propagated to existing process/native-input path comparisons and launch evidence;
+process matching preserves its prior parent-segment spelling behavior. Eight
+additional path tests cover Unicode expansions, basename confusion and lexical
+normalization scope.
+
+Independent builder/exit review passed 49 focused checks with one native Windows
+skip, including two actual Python 3.7 fabricated-source cases. Its six additional
+publication-failure/collision probes retained refusal/incomplete outcomes without
+completion manifests or false process matches. Review did not test actual power
+loss or a running game. Hosted CI for this new source checkpoint is pending.
+
+The final full local suite collected 1,180 tests: 1,165 passed and 15 Windows-only
+fixtures skipped. Actual isolated Python 3.7 was explicitly configured. The
+separate final path-propagation review passed 23 checks with one native Windows
+skip and confirmed unchanged source hashes; it did not review native dispatch or
+the earlier owner/transport boundaries.

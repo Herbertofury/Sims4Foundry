@@ -4,8 +4,9 @@ A mod-neutral home for Sims 4 automation, regression workflows and mod updates.
 This is an **offline-tested foundation, not a complete autonomous game controller**.
 No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqualified.
 
-For practical Apex/external CAS consumption and Modernize's established control
-paths, start with the [consumer handoff](docs/CONSUMER_HANDOFF.md).
+Foundry has no required Apex dependency. It must also test other mods. For the
+independent implementation, usable commands and historical source evidence, start
+with the [consumer handoff](docs/CONSUMER_HANDOFF.md).
 
 ## What works in this checkpoint
 
@@ -53,8 +54,16 @@ paths, start with the [consumer handoff](docs/CONSUMER_HANDOFF.md).
 - A separate default-denied Live read sender, tested with authenticated synthetic
   loopback fixtures and receipt-only recovery, including actual Python 3.7 peers.
   It supplies no CLI live switch, production policy, credentials or game adapter.
+- A deterministic standalone [companion archive builder](docs/COMPANION_BUILD.md)
+  using an explicitly pinned trusted Python 3.7 compiler, with new external output
+  and a separate completion manifest. It compiles without executing companion code.
+- An explicit one-shot [owner runtime](docs/OWNER_RUNTIME.md) connecting the neutral
+  transport to the original-first game tick and narrow native/Live executors.
+  Production admission and automatic startup are not supplied by the archive.
 - Windows-only process/window identity inspection and pinned FFmpeg WGC capture
   implementations. Their native paths still need controlled Windows/game validation.
+- Standalone [process-exit observation](docs/PROCESS_EXIT.md) through an exact
+  retained Windows process handle. It never requests quit or proves a save/normal exit.
 
 ## What does not work yet
 

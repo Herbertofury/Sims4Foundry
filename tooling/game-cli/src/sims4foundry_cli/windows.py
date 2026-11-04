@@ -12,6 +12,7 @@ import subprocess
 import time
 from .errors import FoundryError
 from .io import exact_int, external_path, new_json, plain_path, sha256
+from .path_identity import ascii_lower, same_windows_path
 
 IDENTITY_KEYS = ("pid", "creation_filetime", "executable", "executable_sha256", "hwnd", "thread_id",
                  "window_class", "client_width", "client_height", "client_origin", "dpi", "integrity")
@@ -26,7 +27,7 @@ def validate_identity(value):
     if not all(exact_int(value.get(k), 1, 16384) for k in ("client_width", "client_height")):
         raise FoundryError("invalid_identity", "Missing/unsupported client dimensions.")
     image = value.get("executable")
-    if not isinstance(image, str) or not PureWindowsPath(image).is_absolute() or PureWindowsPath(image).name.casefold() != "ts4_x64.exe":
+    if not isinstance(image, str) or not PureWindowsPath(image).is_absolute() or ascii_lower(PureWindowsPath(image).name) != "ts4_x64.exe":
         raise FoundryError("wrong_executable", "Only an explicitly selected Sims 4 DX11 executable is accepted.")
     checksum = value.get("executable_sha256")
     if not isinstance(checksum, str) or len(checksum) != 64 or any(c not in "0123456789abcdef" for c in checksum):
@@ -59,7 +60,7 @@ def inspect(pid, executable, expected_sha256, hwnd=None):
     if not exact_int(pid, 1, 0xffffffff) or hwnd is not None and not exact_int(hwnd, 1, 2**64-1):
         raise FoundryError("invalid_identity", "Use an explicit PID and optional HWND.")
     executable = plain_path(executable)
-    if executable.name.casefold() != "ts4_x64.exe" or sha256(executable) != expected_sha256:
+    if ascii_lower(executable.name) != "ts4_x64.exe" or sha256(executable) != expected_sha256:
         raise FoundryError("wrong_executable", "Selected executable name/hash does not match.")
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     user = ctypes.WinDLL("user32", use_last_error=True)
@@ -102,7 +103,7 @@ def inspect(pid, executable, expected_sha256, hwnd=None):
         name = ctypes.create_unicode_buffer(32768)
         length = wt.DWORD(len(name))
         require(query_image(process, 0, name, ctypes.byref(length)), "Cannot inspect executable path.")
-        if str(PureWindowsPath(name.value)).casefold() != str(PureWindowsPath(str(executable))).casefold():
+        if not same_windows_path(name.value, str(executable)):
             raise FoundryError("wrong_process", "PID does not belong to the selected executable path.")
         token = wt.HANDLE()
         require(open_token(process, 0x0008, ctypes.byref(token)), "Cannot read target integrity.")
@@ -158,7 +159,7 @@ def inspect(pid, executable, expected_sha256, hwnd=None):
 def capture(identity, ffmpeg, expected_ffmpeg_sha256, destination, *, observer=inspect, runner=subprocess.run):
     validate_identity(identity)
     ffmpeg = plain_path(ffmpeg)
-    if ffmpeg.name.casefold() != "ffmpeg.exe" or sha256(ffmpeg) != expected_ffmpeg_sha256:
+    if ascii_lower(ffmpeg.name) != "ffmpeg.exe" or sha256(ffmpeg) != expected_ffmpeg_sha256:
         raise FoundryError("capture_tool_identity", "Use an explicitly selected, hash-pinned ffmpeg.exe.")
     fresh = observer(identity["pid"], identity["executable"], identity["executable_sha256"], identity["hwnd"])
     same_identity(identity, fresh)

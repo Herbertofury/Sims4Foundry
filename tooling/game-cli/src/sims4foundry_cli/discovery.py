@@ -20,6 +20,7 @@ from pathlib import PureWindowsPath
 import time
 
 from .errors import FoundryError
+from .path_identity import ascii_lower, same_windows_path
 from .io import exact_int, plain_path, sha256
 from . import windows
 
@@ -89,7 +90,7 @@ def _snapshot_image_pids(image_name, *, max_processes=MAX_PROCESSES,
                 raise FoundryError("discovery_limit", "Process snapshot exceeds the enumeration bound.",
                                    max_processes=max_processes)
             # Do not query or retain information for unrelated image names.
-            if entry.szExeFile.casefold() == image_name.casefold():
+            if ascii_lower(entry.szExeFile) == ascii_lower(image_name):
                 pid = int(entry.th32ProcessID)
                 if not exact_int(pid, 1, 0xffffffff) or pid in seen:
                     raise FoundryError("invalid_discovery_snapshot", "Snapshot candidate PID is invalid or repeated.")
@@ -120,7 +121,7 @@ def _selected_executable(executable, expected_sha256):
             or any(c not in "0123456789abcdef" for c in expected_sha256)):
         raise FoundryError("wrong_executable", "Use an explicit lowercase SHA-256 for the selected executable.")
     executable = plain_path(executable)
-    if executable.name.casefold() != IMAGE_NAME.casefold():
+    if ascii_lower(executable.name) != ascii_lower(IMAGE_NAME):
         raise FoundryError("wrong_executable", "Only the explicitly selected TS4_x64.exe is accepted.")
     try:
         actual = sha256(executable)
@@ -138,8 +139,7 @@ def _validate_observation(identity, pid, executable, expected_sha256):
     if not exact_int(identity["pid"], 1, 0xffffffff) or not exact_int(identity["thread_id"], 1, 0xffffffff):
         raise FoundryError("invalid_identity", "Observed process/thread ID must be an exact DWORD.")
     if (identity["pid"] != pid or identity["executable_sha256"] != expected_sha256
-            or str(PureWindowsPath(identity["executable"])).casefold()
-            != str(PureWindowsPath(str(executable))).casefold()):
+            or not same_windows_path(identity["executable"], str(executable))):
         raise FoundryError("wrong_process", "Observed identity does not match the selected PID, executable path and hash.")
     if (identity.get("input_sent", False) is not False
             or identity.get("real_game_control_ready", False) is not False

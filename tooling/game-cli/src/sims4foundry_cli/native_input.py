@@ -23,6 +23,7 @@ from .guarded_input import _validate_sequence
 from .input_packets import InputPacket, Message, CoordinateSpace, MAX_DURATION_MS
 from . import process_lease as leases
 from . import windows
+from .path_identity import same_windows_path
 
 MAX_IMAGE_BYTES = 256 * 1024 * 1024
 MAX_PREPARATION_SECONDS = 5
@@ -212,7 +213,7 @@ class _NativeApi(leases._WindowsApi):
         length = wt.DWORD(len(name))
         _check(self._image(process, 0, name, ctypes.byref(length)) and 0 < length.value < len(name),
                "ownership_changed", "Retained process image is unobservable.")
-        _check(str(PureWindowsPath(name.value)).casefold() == str(PureWindowsPath(expected["executable"])).casefold(),
+        _check(same_windows_path(name.value, expected["executable"]),
                "ownership_changed", "Retained process image path changed.")
         self.window_owner(expected)
         self.validate_lifetime(process, expected)

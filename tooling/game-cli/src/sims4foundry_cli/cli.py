@@ -27,6 +27,12 @@ def parser():
     companion.add_argument("action", choices=("journal-status",))
     companion.add_argument("--directory", required=True)
     companion.add_argument("--request-id", help="Read one existing immutable request; never creates missing history")
+    companion_build = commands.add_parser("companion-build", help="Build a neutral Python 3.7 script archive outside the game; does not install or activate it")
+    companion_build.add_argument("--source", required=True, help="Explicit Foundry companion-src directory")
+    companion_build.add_argument("--output", required=True, help="New external .ts4script path")
+    companion_build.add_argument("--python37", required=True, help="Explicit trusted Python 3.7 compiler executable")
+    companion_build.add_argument("--compiler-sha256", required=True, help="Expected lowercase SHA-256 of that executable")
+    companion_build.add_argument("--manifest-output", help="Optional new external manifest path")
     for domain in ("game", "cas", "live", "build"):
         semantic = commands.add_parser(domain, help="Plan a typed operation (does not execute it)")
         semantic.add_argument("action", choices=[key.split(".", 1)[1] for key in CATALOG if key.startswith(domain + ".")])
@@ -58,6 +64,10 @@ def parser():
     inspect.add_argument("--executable-sha256", required=True)
     inspect.add_argument("--hwnd", type=int)
     inspect.add_argument("--output")
+    observe_exit = commands.add_parser("observe-exit", help="Watch an exact retained process lifetime end; never sends quit or verifies saving")
+    observe_exit.add_argument("--identity", required=True)
+    observe_exit.add_argument("--seconds", type=float, default=30.0)
+    observe_exit.add_argument("--output")
     capture = commands.add_parser("capture", help="Pinned FFmpeg WGC capture only; no input")
     capture.add_argument("--identity", required=True)
     capture.add_argument("--ffmpeg", required=True)
@@ -99,6 +109,10 @@ def parser():
 def run(args):
     if args.command == "capabilities":
         return capabilities(args.backend, args.source_details)
+    if args.command == "companion-build":
+        from .companion_build import build_companion
+        return build_companion(args.source, args.output, args.python37,
+                               args.compiler_sha256, args.manifest_output)
     if args.command == "session":
         if args.action == "create":
             return create_session(args.directory, args.backend)
@@ -135,6 +149,15 @@ def run(args):
         if args.output:
             new_json(external_path(args.output), result)
         return {"ok": True, "identity": result}
+    if args.command == "observe-exit":
+        from .process_exit import observe_exit
+        target = external_path(args.output) if args.output else None
+        if target is not None and target.exists():
+            raise FoundryError("output_exists", "Exit observation needs a new evidence path.")
+        result = observe_exit(read_json(args.identity), args.seconds)
+        if target is not None:
+            new_json(target, result)
+        return result
     if args.command == "discover":
         result = discovery.discover(args.executable, args.executable_sha256)
         if args.output:

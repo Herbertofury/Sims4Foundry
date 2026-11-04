@@ -13,6 +13,7 @@ from xml.etree import ElementTree
 from urllib.parse import urlencode
 from .errors import FoundryError
 from .io import plain_path
+from .path_identity import same_windows_path
 
 
 MAX_BINARY_BYTES = 512 * 1024 * 1024
@@ -137,7 +138,8 @@ def _log_tail(raw, has_prefix):
 
 
 def _same_image(a, b):
-    return ntpath.normcase(ntpath.normpath(a)) == ntpath.normcase(ntpath.normpath(b))
+    # Preserve the launch-log matcher's original lexical normalization only.
+    return same_windows_path(ntpath.normpath(a), ntpath.normpath(b))
 
 
 def prepare(game_root, ea_logs, expected_executable_sha256):

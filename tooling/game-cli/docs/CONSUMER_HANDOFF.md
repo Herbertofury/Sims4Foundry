@@ -1,9 +1,11 @@
-# Handoff for Apex and external CAS tasks
+# Standalone Foundry handoff
 
-Use the existing Modernize/Apex controller for its established game paths while
-the neutral Foundry provider is completed. Foundry does not replace those paths
-with computer use. It also does not claim that a working Apex dependency is an
-independent no-Apex implementation.
+Foundry must work independently of Apex so the same tool can test other mods.
+Apex is a source reference and a possible consumer, not a required provider,
+installed dependency, startup prerequisite or fallback. The implementation does
+not import Apex, call its bridge or require its DLL. The canceled compatibility
+adapter is not included. Existing Modernize methods guide the neutral port;
+their historical success is not a claim that the independent port is complete.
 
 ## Use Foundry now
 
@@ -12,13 +14,11 @@ Install from the selected Sims4Foundry checkout with Python 3.11 or later:
 ```text
 python -m pip install ./tooling/game-cli
 foundry-game capabilities --source-details
-foundry-game apex-inventory --repository "APEX_CHECKOUT"
 ```
 
-`apex-inventory` parses source and reports its declarations/hashes. It does not
-import the helper, contact a bridge, admit a game session or certify its current
-behavior. Inspect the output against the actual owner's checkout, not an old
-snapshot or a similarly named journal.
+An optional migration-research command, `apex-inventory --repository PATH`, parses
+an explicitly selected historical source tree. It is not part of Foundry setup
+or operation. No Apex checkout is needed for the commands below.
 
 These commands perform real offline mod work without a screen or game process:
 
@@ -43,7 +43,29 @@ Use them only within the consumer task's authorized scope; they are not an
 alternate route around a denied process/profile inspection. `launch-plan` only
 prepares read-only EA metadata and does not launch a game.
 
-## Reuse Modernize's existing game methods
+Independent process termination can now be observed without an Apex bridge:
+
+```text
+foundry-game observe-exit --identity "CURRENT_IDENTITY.json" --seconds 30 --output "NEW_EXIT_OBSERVATION.json"
+```
+
+This sends no quit or save request. It retains and verifies the exact process
+lifetime; a missing/inaccessible PID is not success. Termination does not prove
+normal exit, saving or persistence. See [PROCESS_EXIT.md](PROCESS_EXIT.md).
+
+Build the neutral development archive without an Apex checkout or installation:
+
+```text
+foundry-game companion-build --source "tooling/game-cli/companion-src" --output "NEW_EXTERNAL/FoundryCompanion.ts4script" --python37 "TRUSTED_PYTHON37" --compiler-sha256 "EXPECTED_COMPILER_SHA256"
+```
+
+The archive and completion manifest contain deterministic source/bytecode hashes.
+The build does not install, activate or qualify the companion. The explicit
+owner-runtime integration is present; automatic startup, production admission,
+key provisioning and real-game checks are still separate work. See
+[COMPANION_BUILD.md](COMPANION_BUILD.md) and [OWNER_RUNTIME.md](OWNER_RUNTIME.md).
+
+## Historical source evidence for the standalone port
 
 The supplied control handoff and source review established these paths:
 
@@ -67,8 +89,9 @@ lineage and dependency boundaries are in [MIGRATION.md](MIGRATION.md) and
 helper hashes, current profile ownership or every operation's current-patch
 behavior. A parsed command name is not a passing game test.
 
-The reviewed historical CLI exposes these exact command families, to be checked
-against the current owner's checkout before use:
+The reviewed historical CLI exposes the following reference commands. These are
+source/evidence locators for porting the behavior, not Foundry commands or a
+recommendation to install Apex to make Foundry work:
 
 ```text
 python tools/apex_cli.py wait --state "CURRENT_VERIFIED_STATE" --seconds 30
@@ -83,8 +106,9 @@ python tools/apex_cli.py game shutdown --state "CURRENT_VERIFIED_STATE" --backgr
 python tools/apex_cli.py game exit --state "CURRENT_VERIFIED_STATE" --background --sim-id "EXACT_SIM_ID" --household-id "EXACT_HOUSEHOLD_ID" --save-guid "EXACT_SAVE_GUID" --output "NEW_UNSAVED_EXIT_PROOF.json"
 ```
 
-These are command templates, not instructions to run against an unbound active
-session. `shutdown` is the save-and-exit path. `game quit` merely requests the
+These historical templates must not be run against an unbound active session or
+substituted for the independent implementation. `shutdown` is the save-and-exit
+path. `game quit` merely requests the
 native quit menu; a successful request alone is not process exit. The separate
 unsaved `game exit` path additionally requires exact Sim, household and save
 GUID plus its own proof. Do not substitute saving, discarding or termination for
@@ -114,7 +138,7 @@ fixture peers. See [LIVE_READ_ROUTE.md](LIVE_READ_ROUTE.md) and
 [LIVE_EXCHANGE.md](LIVE_EXCHANGE.md).
 
 Consumers must not point those fixtures or public test keys at a game. A real
-host still needs its own installed companion, native readers and owner scheduler,
+host still needs its own installed companion, native readers and admitted owner runtime,
 exact process/profile permission, session-key provisioning and durable shared
 history reconciliation. The CLI has no live-send switch. Default gates remain
 denied, and a returned adapter claim is not independent evidence.
