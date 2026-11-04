@@ -55,5 +55,7 @@ save/reload test.
 
 For follow-up on native undo, the installed game's generated
 `BuildBuy_pb2.pyc` exposes a `BBUndoRedoState` message with `canUndo` and
-`canRedo` fields. That observation is a state-message lead only; it does not
-identify an input command, a transaction boundary, or a safe undo implementation.
+`canRedo` fields, and `Consts_pb2.pyc` names an
+`EVENT_BB_UNDOREDO_STATE_CHANGE` event. Those observations are state-message
+leads only; they do not identify an input command, a transaction boundary, or
+a safe undo implementation.
