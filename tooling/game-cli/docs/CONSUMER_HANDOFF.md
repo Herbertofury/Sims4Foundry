@@ -77,6 +77,11 @@ retained target process, instead of treating an HMAC key or port as PID proof.
 This is a library primitive, not a new live-send CLI switch. See
 [LOOPBACK_OWNER.md](LOOPBACK_OWNER.md).
 
+The separate `ProcessBoundPeer` library callback now composes an already held
+process lease, that connected-tuple ownership observation and a supplied session
+key. Both existing senders can use it; it grants no profile or operation
+permission and creates no CLI send route. See [PROCESS_BOUND_PEER.md](PROCESS_BOUND_PEER.md).
+
 ## Historical source evidence for the standalone port
 
 The supplied control handoff and source review established these paths:

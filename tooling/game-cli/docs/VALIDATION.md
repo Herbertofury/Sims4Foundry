@@ -834,3 +834,38 @@ The frozen startup checkpoint's complete local suite collected 1,282 tests:
 compiler explicitly configured. The actual separate diagnostic archive built
 from that checkpoint has six members and 43,073 bytes. Its fixture-only output
 configuration is not an installation instruction; no archive was deployed.
+
+At connected-owner head d0aba920cf6dd13c0065537d59006d330827a131, all six jobs
+passed in both workflows. Windows 3.11 and 3.14 PR logs collected 1,217 tests
+with 27 skips and confirm the real newly owned connected-server fixture passed.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41882351258
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41882270058
+
+At diagnostic head 5d0dbedf49f03ea15324317b22be757d311d8889, all six jobs also
+passed in both workflows. Inspected Windows 3.11 and 3.14 PR logs collected 1,282
+tests with 30 skips: 47 of the 49 new diagnostic tests passed and two explicitly
+POSIX-only fixtures skipped. The real connected-server fixture passed again.
+The isolated installed wheel passed the 14-step synthetic/offline smoke checks;
+its host source and tests match the published checkpoint. None of these results
+establish actual game loader, game-thread or profile isolation behavior.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41883162851
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41883172698
+
+## Composed process-bound peer callback
+
+The new callback composes a genuine already-held lease, the same connected
+IPv4 loopback socket's OS owner and session-key authentication. It is not a live
+CLI switch, key provider, profile permission or mutation admission. Its 34
+fabricated tests exercise both sender versions and receipt reads with the real
+HMAC codec in memory, plus owner denial, changed process/socket/intent, lifecycle
+and deadline refusals before application send. The full configured local suite
+collects 1,316 tests: 1,300 passed and 16 Windows-only fixtures skipped.
+
+Independent review passed those 34 tests and 16 additional fabricated scenarios,
+including lease closure during ownership/authentication, socket-snapshot deadline
+expiry, malformed owner results, post-auth context changes and integer/float TTL
+preservation. No actionable new integration defect was found. This review was
+limited to the new composition and its call contracts; the older final
+owner/transport re-review remains incomplete. The source documents the trusted
+interpreter boundary and does not claim application-frame MAC/encryption or
+real-game qualification. Exact-head CI for this new callback is pending.
