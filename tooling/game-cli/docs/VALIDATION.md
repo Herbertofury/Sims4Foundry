@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 884 tests collected, 870 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 900 tests collected, 886 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -534,3 +534,32 @@ Build, queue, transport, host CLI/fixture and packaging source remain unchanged.
 No real adapters, game imports, bootstrap, transport/CLI route or native action
 were added. Exact-head hosted CI is pending. See
 [LIVE_NATIVE_OBSERVATION.md](LIVE_NATIVE_OBSERVATION.md).
+
+At Live-reader head 6d5931bb8cc06007f9557407d43eb92daa8bea21, all six
+Windows/Linux Python 3.11/3.13/3.14 jobs passed in both push and PR workflows.
+The Windows 3.14 PR log explicitly passed all 42 new reader tests: 884 tests
+collected, 10 total skips. The PR remained draft at the matching source head.
+Host CLI/packaging inputs remain identical to the earlier validated c062d2e
+wheel; the new companion reader is deliberately not bundled into that wheel.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41846054259
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41846063134
+
+Sixteen new cross-component observation tests exercise the real source readers,
+owner queue, both wire codecs, host receipt parser and temporary synthetic journal.
+Maximum source DTOs can fit the byte budget while exceeding the queue's structural
+limit; availability fields and wrapper metadata change the exact threshold.
+After a started read returns an oversized result, the queue records unknown and
+retains no rejected DTO. Same-ID attempts do not execute or send again. Small
+accepted observations preserve unavailable markers and exact IDs through both
+codecs, while the journal deliberately retains only a summary and receipt digest.
+
+All 16 new tests pass on current Python. On actual Python 3.7, 12 pass and four
+host-only checks skip; the combined Build/Live/queue/budget group runs 158 tests
+with the same four host-only skips there, and all 158 pass on current Python.
+The full local suite above passes. This test/documentation checkpoint changes no
+production code, routes, limits or authority. Exact-head hosted CI is pending.
+See [OBSERVATION_TRANSPORT.md](OBSERVATION_TRANSPORT.md) for wrapper-specific
+thresholds and the remaining integration contract.
+Independent review found no blocking issues. Six extra adversarial probes passed
+on both runtimes, including deferred completion under lock contention; six
+actual cross-runtime frames passed type-aware roundtrips in each direction.

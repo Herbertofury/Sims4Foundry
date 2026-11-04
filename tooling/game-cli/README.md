@@ -39,6 +39,9 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
   IDs and transient occurrence references without inferring action completion.
 - An uninstalled, default-denied Live queue reader seam for one explicit actor,
   tested only with injected fabricated readers and bounded sequential iteration.
+- Cross-component observation-budget regressions covering the queue, both wire
+  codecs and digest-only journal. The source readers are not transport adapters;
+  their maximum snapshots do not always fit the queue's structural limits.
 - Windows-only process/window identity inspection and pinned FFmpeg WGC capture
   implementations. Their native paths still need controlled Windows/game validation.
 
@@ -53,6 +56,9 @@ It does not claim support for every Sims feature merely because a command is lis
 The existing Apex CLI is a distinct, Apex-dependent controller. Its successful
 background clicks are not proof that no-Apex Windows messages work. See
 [Migration evidence](docs/MIGRATION.md) and [qualification gates](docs/QUALIFICATION.md).
+The [observation transport contract](docs/OBSERVATION_TRANSPORT.md) records the
+remaining envelope, lossless-field and result-retention requirements before any
+Build or Live reader can be integrated with the companion transport.
 
 ## Install and test
 

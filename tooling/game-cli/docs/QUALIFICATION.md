@@ -84,6 +84,11 @@ Only after this evidence is reviewed should a separate single-action test begin.
   The separate [Live reader seam](LIVE_NATIVE_OBSERVATION.md) adds only an
   uninstalled injected-reader contract; no native adapters, mode source, bootstrap
   or action outcome verifier are qualified.
+  [Cross-component budget tests](OBSERVATION_TRANSPORT.md) show that valid maximum
+  reader DTOs can exceed the existing queue's node limit. Integration must define
+  a lossless, bounded complete result and receipt, retain unavailable fields, and
+  refuse whole oversized reads explicitly. Journal receipt digests cannot recover
+  observation bodies. No reader-to-transport route is implemented.
 - Reviewed, reversible mod installation/update/rollback on a closed disposable
   profile. Staging currently stops before installation.
 - Coverage expansion beyond the initial operation catalog, driven by real tasks.
