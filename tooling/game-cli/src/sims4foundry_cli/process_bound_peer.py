@@ -14,6 +14,7 @@ from time import monotonic
 
 from . import companion_auth as auth
 from . import companion_live_protocol as live
+from . import companion_build_protocol as build
 from . import companion_protocol as wire
 from . import companion_transport as transport
 from . import loopback_owner
@@ -25,7 +26,7 @@ from .errors import FoundryError
 # Tests patch this private binding with a fabricated socket; no API accepts one.
 _SOCKET_TYPE = socket.socket
 _MAX_DEADLINE_SECONDS = 5.0
-_Submission = transport.Submission | live.LiveQueueSubmission
+_Submission = transport.Submission | live.LiveQueueSubmission | build.BuildSubmission
 
 
 def _require(condition, code, message):
@@ -79,12 +80,17 @@ def _schema2_submission(submission):
 
 def _snapshot(submission):
     """Return detached, revalidated typed intent and its exact canonical bytes."""
-    _require(type(submission) in (transport.Submission, live.LiveQueueSubmission),
+    _require(type(submission) in (transport.Submission, live.LiveQueueSubmission, build.BuildSubmission),
              "invalid_request", "Expected an exact schema-2 or schema-3 original submission.")
     try:
         if type(submission) is transport.Submission:
             detached = _schema2_submission(submission)
             payload = wire.encode_frame(transport.Submission.to_wire(detached))[4:]
+        elif type(submission) is build.BuildSubmission:
+            payload = wire.encode_frame(build.BuildSubmission.to_wire(submission))[4:]
+            value = wire.decode_payload(payload)
+            detached = build.parse_build_submit(value, value['session_id'],
+                                                wire.ProcessEpoch(**value['process_epoch']))
         else:
             payload = wire.encode_frame(live.LiveQueueSubmission.to_wire(submission))[4:]
             value = wire.decode_payload(payload)

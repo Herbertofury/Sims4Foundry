@@ -321,6 +321,11 @@ def _legacy_request_from_key(key):
 
 def operation_is_mutation(request):
     """Only exact known types/operations classify; unknown never means read."""
+    if type(request) not in (Request, LiveQueueRequest) and __package__:
+        from .build_request import BuildRequest, request_key
+        if type(request) is BuildRequest:
+            request_key(request)
+            return request.operation == "build.transform_selected"
     if type(request) is LiveQueueRequest:
         LiveQueueRequest.validate(request)
         return False
@@ -364,6 +369,7 @@ class _Entry:
     mutation: bool
     legacy_key: object = None
     live_key: object = None
+    build_key: object = None
 
 
 def _snapshot_copy(snapshot):
@@ -389,11 +395,17 @@ def _copy_frozen_result(value):
 
 
 def _entry_request(entry):
+    if entry.build_key is not None:
+        from .build_request import request_from_key
+        return request_from_key(entry.build_key)
     return (_legacy_request_from_key(entry.legacy_key) if entry.live_key is None
             else live_request_from_key(entry.live_key))
 
 
 def _entry_view_unchanged(entry, view):
+    if entry.build_key is not None:
+        from .build_request import request_key
+        return request_key(view) == entry.build_key
     return (_legacy_request_key(view) == entry.legacy_key if entry.live_key is None
             else live_request_key(view) == entry.live_key)
 
@@ -529,10 +541,15 @@ class CompanionQueue:
 
     def submit(self, request):
         """Admit or return the existing snapshot. Never execute or wait as owner."""
+        build_key = None
+        if type(request) not in (Request, LiveQueueRequest) and __package__:
+            from .build_request import BuildRequest, request_key, request_from_key
+            build_key = request_key(request) if type(request) is BuildRequest else None
         live_key = live_request_key(request) if type(request) is LiveQueueRequest else None
-        legacy_key = _legacy_request_key(request) if live_key is None else None
-        request = (_legacy_request_from_key(legacy_key) if live_key is None
-                   else live_request_from_key(live_key))
+        legacy_key = _legacy_request_key(request) if live_key is None and build_key is None else None
+        request = (request_from_key(build_key) if build_key is not None else
+                   live_request_from_key(live_key) if live_key is not None else
+                   _legacy_request_from_key(legacy_key))
         mutation = operation_is_mutation(request)
         _check(request.session_id == self._session_id, "session_mismatch",
                "Request belongs to a different session; reconcile rather than replay.")
@@ -541,7 +558,8 @@ class CompanionQueue:
             self._apply_completed()
             existing = self._entries.get(request.request_id)
             if existing is not None:
-                if existing.live_key != live_key or existing.legacy_key != legacy_key:
+                if (existing.live_key != live_key or existing.legacy_key != legacy_key
+                        or existing.build_key != build_key):
                     self._mutation_blocked_reason = self._mutation_blocked_reason or "request_conflict"
                     raise QueueError("request_conflict", "This ID has a different immutable payload.")
                 return _snapshot_copy(existing.snapshot)
@@ -559,7 +577,7 @@ class CompanionQueue:
             snapshot = Snapshot(request.request_id, self._session_id,
                                 "refused" if reason else "pending", reason,
                                 admitted_at=now, expires_at=deadline)
-            self._entries[request.request_id] = _Entry(snapshot, mutation, legacy_key, live_key)
+            self._entries[request.request_id] = _Entry(snapshot, mutation, legacy_key, live_key, build_key)
             if reason is None:
                 self._pending.append(request.request_id)
             return _snapshot_copy(snapshot)
@@ -723,6 +741,10 @@ class CompanionQueue:
                     from .live_wire import preview_result_receipt
                     preview_result_receipt(_thaw_result(candidate),
                                            live_request_from_key(entry.live_key))
+                if entry.build_key is not None:
+                    from .build_wire import preview_result_receipt
+                    from .build_request import request_from_key
+                    preview_result_receipt(_thaw_result(candidate), request_from_key(entry.build_key))
                 result = candidate
                 state, reason = result["outcome"], None
             except Exception:

@@ -1,4 +1,4 @@
-"""Neutral compiler fixtures only: never import an archive or touch a game."""
+"""Owned compiler/archive fixtures only; isolated imports never touch a game."""
 import base64
 import hashlib
 import io
@@ -69,7 +69,7 @@ class CompanionBuildTests(unittest.TestCase):
         with mock.patch.object(build, "_run_compiler", side_effect=self.fake_run) as run:
             manifest = self.run_build()
         self.assertEqual(1, run.call_count)
-        self.assertEqual(24, manifest["member_count"])
+        self.assertEqual(42, manifest["member_count"])
         self.assertEqual(list(build.MODULES), [row["module"] for row in manifest["modules"]])
         raw = self.output.read_bytes()
         self.assertEqual(hashlib.sha256(raw).hexdigest(), manifest["sha256"])
@@ -91,6 +91,15 @@ class CompanionBuildTests(unittest.TestCase):
                 else:
                     self.assertEqual(build.PYC_PREFIX, archive.read(item)[:8])
         self.assertEqual([], list(self.output.parent.glob(".foundry-*")))
+
+    def test_build_adapters_are_in_the_exact_package_allowlist(self):
+        self.assertEqual({
+            'build_create', 'build_destroy', 'build_native_readers',
+            'build_observation', 'build_transform', 'build_variant',
+            'build_executor', 'build_request', 'build_schema', 'build_wire'},
+            {Path(name).stem for name in build.MODULES
+             if Path(name).stem.startswith('build_')})
+        self.assertEqual(21, len(build.MODULES))
 
     def test_deterministic_under_source_root_mtime_and_output_directory_changes(self):
         with mock.patch.object(build, "_run_compiler", side_effect=self.fake_run):
@@ -458,8 +467,46 @@ class ActualPython37BuildTests(unittest.TestCase):
     def test_actual_neutral_repository_source_compiles(self):
         source = Path(__file__).resolve().parents[1] / "companion-src"
         result = self.run_build(source_root=source)
-        self.assertEqual(24, result["member_count"])
+        self.assertEqual(42, result["member_count"])
         self.assertFalse(result["live_qualified"])
+
+    def test_actual_repository_archive_imports_build_adapters_inertly(self):
+        source = Path(__file__).resolve().parents[1] / "companion-src"
+        self.run_build(source_root=source)
+        script = r'''
+import builtins, importlib, socket, sys, threading
+archive = sys.argv[1]
+sys.path.insert(0, archive)
+original_import = builtins.__import__
+forbidden = {'services', 'sims4', 'objects', 'build_buy', 'zone', 'apex'}
+def guarded_import(name, *args, **kwargs):
+    if name.split('.')[0] in forbidden:
+        raise AssertionError('game/private import attempted: ' + name)
+    return original_import(name, *args, **kwargs)
+def refuse(*args, **kwargs):
+    raise AssertionError('import attempted activation')
+builtins.__import__ = guarded_import
+socket.socket = refuse
+threading.Thread.start = refuse
+for name in ('build_native_readers', 'build_transform', 'build_create',
+             'build_destroy', 'build_variant'):
+    module = importlib.import_module('foundry_companion.' + name)
+    assert module.__file__.startswith(archive + '/'), module.__file__
+assert not forbidden.intersection(sys.modules)
+assert not any(name in sys.modules for name in ('build_transform', 'build_create',
+    'build_destroy', 'build_variant', 'build_native_readers'))
+print('owned archive imports inert')
+'''
+        # Only this fixture imports known repository code, after compilation.
+        # No installation, game bootstrap, service discovery or native dispatch.
+        for compiler in (self.compiler, Path(__import__('sys').executable)):
+            result = subprocess.run([str(compiler), '-I', '-B', '-S', '-c', script,
+                                     str(self.output)], cwd=str(self.root),
+                                    env=build._compiler_environment(compiler),
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    timeout=30, check=False)
+            self.assertEqual(0, result.returncode, result.stderr.decode())
+            self.assertEqual(b'owned archive imports inert\n', result.stdout)
 
 
 if __name__ == "__main__":

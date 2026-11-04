@@ -12,6 +12,7 @@ from types import ModuleType
 import weakref
 
 from .native import NativeAPI, NativeRefusal
+from .build_request import BuildRequest
 from .queue import LiveQueueRequest, ProcessEpoch, QueueBusy, Request
 from .transport import LoopbackTransport, MAX_CONNECTION_SECONDS
 
@@ -28,6 +29,22 @@ class LiveReaders:
     context_reader: object
     sim_info_reader: object
     instance_reader: object
+    admission: object = None
+
+
+@dataclass(frozen=True)
+class BuildReaders:
+    """Explicit trusted callbacks, no production provider or automatic admission."""
+    deployment_sha256: str
+    context_reader: object
+    object_reader: object
+    vector3: object
+    yaw_quaternion: object
+    surface_identifier: object
+    world_surface_type: int
+    transform: object
+    location: object
+    test_location: object
     admission: object = None
 
 
@@ -66,7 +83,7 @@ class OwnerRuntime(object):
     """
     def __init__(self, session_id, process_epoch, module_loader=None,
                  host_policy=None, native_admission=None, command_modules=None,
-                 live_readers=None):
+                 live_readers=None, build_readers=None):
         if module_loader is not None and not callable(module_loader):
             raise OwnerRuntimeError('invalid_module_loader')
         if command_modules is None:
@@ -86,6 +103,13 @@ class OwnerRuntime(object):
                                        live_readers.sim_info_reader,
                                        live_readers.instance_reader,
                                        live_readers.admission)
+        if build_readers is not None:
+            if type(build_readers) is not BuildReaders:
+                raise OwnerRuntimeError('invalid_build_readers')
+            build_readers = BuildReaders(**{
+                name: getattr(build_readers, name) for name in BuildReaders.__dataclass_fields__})
+        self._build_readers = build_readers
+        self._build = None
         self._owner = threading.current_thread()
         self._transport = LoopbackTransport(session_id, process_epoch, policy=host_policy)
         binding = self._transport.binding
@@ -137,14 +161,23 @@ class OwnerRuntime(object):
             raise NativeRefusal('An admitted already-loaded command module is required.')
         return self._commands[name]
 
+    def _build_owner_active(self):
+        # Plain owned runtime state only, no game callback, imports or I/O.
+        return (threading.current_thread() is self._owner and self._enabled
+                and self._tick_depth == 1 and self._hook_is_current())
+
     def _execute(self, request):
         self._owned()
         if not self._hook_is_current():
             self._enabled = False
             self._state = 'hook_replaced'
+            if self._build is not None:
+                self._build.close()
             raise NativeRefusal('The owner hook has been replaced.')
         if not self._enabled or self._tick_depth != 1:
             raise NativeRefusal('Execution requires the active outer owner tick.')
+        if type(request) is BuildRequest and self._build is not None:
+            return self._build.execute(request)
         if type(request) is Request:
             return self._native.execute(request)
         if type(request) is LiveQueueRequest and self._live is not None:
@@ -159,9 +192,13 @@ class OwnerRuntime(object):
             # not dispatch through it, walk/rewrite it or overwrite its hook.
             self._enabled = False
             self._state = 'hook_replaced'
+            if self._build is not None:
+                self._build.close()
             self._last_tick = 'hook_replaced'
             return
         try:
+            if self._build is not None:
+                self._build.poll_context()
             self._transport.owner_tick(self._execute)
             self._last_tick = 'drained'
         except QueueBusy:
@@ -174,6 +211,8 @@ class OwnerRuntime(object):
             # No reporting callback, logging, socket cleanup or retry on a tick.
             self._enabled = False
             self._state = 'dispatch_fault'
+            if self._build is not None:
+                self._build.close()
             self._last_tick = 'dispatch_fault'
 
     def _make_wrapper(self, original):
@@ -241,6 +280,15 @@ class OwnerRuntime(object):
                     readers.sim_info_reader, readers.instance_reader,
                     admission=readers.admission, session_id=session,
                     process_epoch=ProcessEpoch(pid, created))
+            if self._build_readers is not None:
+                from .build_executor import BuildExecutor
+                providers = self._build_readers
+                self._build = BuildExecutor(session, ProcessEpoch(pid, created),
+                    providers.deployment_sha256, providers.context_reader, providers.object_reader,
+                    providers.vector3, providers.yaw_quaternion, providers.surface_identifier,
+                    providers.world_surface_type, providers.transform, providers.location,
+                    providers.test_location, admission=providers.admission,
+                    owner_active=self._build_owner_active)
             if self._state != 'installing':
                 raise OwnerRuntimeError('installation_interrupted')
             if core.__dict__.get('on_tick') is not original:
@@ -256,6 +304,8 @@ class OwnerRuntime(object):
         except BaseException:
             self._enabled = False
             self._state = 'install_failed'
+            if self._build is not None:
+                self._build.close()
             self._restore_own_hook()
             try:
                 self._cleanup_complete = self._transport.shutdown() is True
@@ -276,6 +326,8 @@ class OwnerRuntime(object):
             raise OwnerRuntimeError('invalid_timeout')
         self._enabled = False
         self._state = 'closing'
+        if self._build is not None:
+            self._build.close()
         if self._tick_depth:
             self._state = 'cleanup_pending'
             raise OwnerRuntimeError('close_inside_tick')

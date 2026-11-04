@@ -71,6 +71,15 @@ The source root must contain only `foundry_companion/`, with this fixed allowlis
 
 - `__init__.py`
 - `build_observation.py`
+- `build_native_readers.py`
+- `build_transform.py`
+- `build_create.py`
+- `build_destroy.py`
+- `build_variant.py`
+- `build_executor.py`
+- `build_request.py`
+- `build_schema.py`
+- `build_wire.py`
 - `live_executor.py`
 - `live_observation.py`
 - `live_schema.py`
@@ -90,8 +99,8 @@ module ownership; it is not a semantic audit of caller-modified source content.
 
 The trusted compiler driver calls `compile()` with package-relative filenames,
 `dont_inherit=True`, and `optimize=0`. It never imports or executes those code
-objects. Python 3.7 itself checks source syntax. The archive contains all 12 source
-files and their 12 adjacent `.pyc` files, for 24 members in sorted order.
+objects. Python 3.7 itself checks source syntax. The archive contains all 21 source
+files and their 21 adjacent `.pyc` files, for 42 members in sorted order.
 Every generated `.pyc` must have:
 
 - CPython magic `420d0d0a`.
@@ -195,3 +204,18 @@ packages, run candidate code or reuse an existing `.ts4script` payload.
 Remaining gates include a reviewed startup activation path, explicit production
 host/profile admission, game-loader qualification and controlled gameplay tests.
 ZIP validity and deterministic compilation establish none of those gates.
+
+## Packaged Build adapters
+
+The five Build reader/direct-operation modules come from the verified public
+`9bf905924c92183fa73975c4b0dd11ea0bcc44f5` checkpoint. Imports are package-relative,
+and each module records its source blob. Sequential running/Build flag rechecks
+reject observed changes; they are not atomic snapshot guarantees.
+
+These direct adapters alone do not supply profile admission or a bootstrap.
+The separately integrated schema-4 capture/transform route is documented in
+[BUILD_TRANSFORM_ROUTE.md](BUILD_TRANSFORM_ROUTE.md).
+Create is not purchase/placement, destroy is not sale, and definition changes are
+not qualified swatches. The direct transform does not retain original selection
+lifetime or supply durable history by itself. Packaging does not qualify any
+native callback or demonstrate actual game execution.

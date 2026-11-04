@@ -24,7 +24,9 @@ from .launch import _same_open_source, _stamp
 
 
 MODULES = tuple("foundry_companion/" + name + ".py" for name in (
-    "__init__", "build_observation", "live_executor", "live_observation",
+    "__init__", "build_create", "build_destroy", "build_executor", "build_native_readers",
+    "build_observation", "build_request", "build_schema", "build_transform", "build_variant",
+    "build_wire", "live_executor", "live_observation",
     "live_schema", "live_wire", "native", "owner_runtime", "peer_auth",
     "queue", "transport", "wire"))
 MAGIC = bytes.fromhex("420d0d0a")

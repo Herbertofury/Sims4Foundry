@@ -181,9 +181,15 @@ class LoopbackTransport:
         if schema == 3:
             from . import live_wire
             parser = live_wire.parse_submit
+        elif schema == 4:
+            from . import build_wire
+            parser = build_wire.parse_submit
         return parser(decode_payload(payload), binding.session_id, binding.process_epoch)
 
     def _request_matches(self, request, payload, schema):
+        if schema == 4:
+            from . import build_wire
+            return build_wire.canonical_payload(request) == payload
         if schema == 3:
             from . import live_wire
             return live_wire.canonical_payload(request) == payload
@@ -195,6 +201,9 @@ class LoopbackTransport:
         if schema == 3:
             from . import live_wire
             expected_type = live_wire.Submission
+        elif schema == 4:
+            from . import build_wire
+            expected_type = build_wire.Submission
         try:
             return (type(submission) is expected_type
                     and type(submission.canonical_payload) is bytes
@@ -384,7 +393,7 @@ class LoopbackTransport:
         if self._stop.is_set():
             raise ProtocolError("transport_shutdown", "Transport is permanently closed.")
         # Schema 3 is explicit, never inferred from an operation or retried as v2.
-        schema = 3 if type(value.get('schema')) is int and value['schema'] == 3 else 2
+        schema = value['schema'] if type(value.get('schema')) is int and value['schema'] in (3, 4) else 2
         submit_parser, read_parser, make_receipt = parse_submit, parse_receipt_read, receipt
         binding = self._binding_copy()
         session, epoch = binding.session_id, binding.process_epoch
@@ -392,6 +401,10 @@ class LoopbackTransport:
             from . import live_wire
             submit_parser, read_parser, make_receipt = (live_wire.parse_submit,
                 live_wire.parse_receipt_read, live_wire.receipt)
+        elif schema == 4:
+            from . import build_wire
+            submit_parser, read_parser, make_receipt = (build_wire.parse_submit,
+                build_wire.parse_receipt_read, build_wire.receipt)
         if value.get("kind") == "receipt_read":
             request_id, digest = read_parser(value, session, epoch)
             _remaining(deadline)

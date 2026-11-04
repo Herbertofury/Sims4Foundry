@@ -21,6 +21,7 @@ import uuid
 
 from . import companion_protocol as wire
 from . import companion_live_protocol as live
+from . import companion_build_protocol as build
 from .companion_transport import ExpectedContext, ReceiptRead, Submission, parse_receipt
 from .errors import FoundryError
 from .io import external_path, lock, new_json, plain_path, replace_json, sync_directory
@@ -99,6 +100,13 @@ def _read(path):
 
 def _submission(value):
     _require(type(value) is dict and type(value.get("schema")) is int)
+    if value["schema"] == 4:
+        epoch = value.get('process_epoch')
+        _fields(epoch, {'pid', 'creation_filetime'})
+        try:
+            return build.parse_build_submit(value, value.get('session_id'), wire.ProcessEpoch(**epoch))
+        except (wire.ProtocolError, TypeError, KeyError):
+            _require(False)
     if value["schema"] == 3:
         epoch = value.get("process_epoch")
         _fields(epoch, {"pid", "creation_filetime"})
@@ -158,6 +166,10 @@ def _message_wire(message):
         return dict(schema=2, kind="receipt_read", request_id=request["request_id"],
                     session_id=request["session_id"], process_epoch=request["process_epoch"],
                     request_sha256=hashlib.sha256(wire.encode_frame(original)[4:]).hexdigest())
+    if kind is build.BuildSubmission:
+        return build.BuildSubmission.to_wire(message)
+    if kind is build.BuildReceiptRead:
+        return build.BuildReceiptRead.to_wire(message)
     if kind is live.LiveQueueSubmission:
         return live.LiveQueueSubmission.to_wire(message)
     if kind is live.LiveQueueReceiptRead:
@@ -166,12 +178,15 @@ def _message_wire(message):
 
 
 def _is_submission(message):
-    _require(type(message) in (Submission, ReceiptRead, live.LiveQueueSubmission, live.LiveQueueReceiptRead),
+    _require(type(message) in (Submission, ReceiptRead, live.LiveQueueSubmission, live.LiveQueueReceiptRead, build.BuildSubmission, build.BuildReceiptRead),
              "invalid_request", "Use an exact supported submission or receipt read.")
-    return type(message) in (Submission, live.LiveQueueSubmission)
+    return type(message) in (Submission, live.LiveQueueSubmission, build.BuildSubmission)
 
 
 def _is_mutation(submission):
+    if type(submission) is build.BuildSubmission:
+        original = build.BuildSubmission.to_wire(submission)
+        return original['operation'] == 'build.transform_selected'
     if type(submission) is live.LiveQueueSubmission:
         live.LiveQueueSubmission.to_wire(submission)
         return False
@@ -187,6 +202,8 @@ def _is_mutation(submission):
 
 
 def _receipt_reader(submission):
+    if type(submission) is build.BuildSubmission:
+        return build.BuildReceiptRead(submission)
     if type(submission) is live.LiveQueueSubmission:
         return live.LiveQueueReceiptRead(submission)
     _require(type(submission) is Submission, "invalid_request", "Use an exact supported submission.")
@@ -194,6 +211,8 @@ def _receipt_reader(submission):
 
 
 def _parse_receipt(receipt, submission):
+    if type(submission) is build.BuildSubmission:
+        return build.parse_build_receipt(receipt, submission)
     if type(submission) is live.LiveQueueSubmission:
         return live.parse_live_receipt(receipt, submission)
     _require(type(submission) is Submission, "invalid_request", "Use an exact supported submission.")
@@ -201,7 +220,7 @@ def _parse_receipt(receipt, submission):
 
 
 def _freeze(submission):
-    _require(type(submission) in (Submission, live.LiveQueueSubmission),
+    _require(type(submission) in (Submission, live.LiveQueueSubmission, build.BuildSubmission),
              "invalid_request", "Use an exact typed schema-2 or schema-3 submission.")
     # Copy through the strict codec: never retain caller-owned values, and never
     # use Python numeric equality to conflate a 5 with a 5.0 TTL/digest.
@@ -453,7 +472,7 @@ class Journal:
                         entry.uncertain = True
                     else:
                         snapshot = _parse_snapshot(data["snapshot"])
-                        if type(entry.submission) is live.LiveQueueSubmission:
+                        if type(entry.submission) in (live.LiveQueueSubmission, build.BuildSubmission):
                             _require(snapshot.adapter_outcome in (None, "unverified"))
                         _progress(entry, snapshot)
                         entry.receipt = snapshot

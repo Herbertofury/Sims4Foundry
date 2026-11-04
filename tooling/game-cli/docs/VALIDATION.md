@@ -975,4 +975,50 @@ size: 177,135 bytes. No actual game, native process or user profile was accessed
 Consistent or forged files do not confer authority: loader/live/game and command
 authorization remain false, while owner/outside-tick authority remains unknown.
 Archive matching is size/hash correlation only, not code authentication or
-execution evidence. Exact-head CI for this addition is pending.
+execution evidence. All twelve exact-head CI jobs passed at
+`2c3789f708f4eb541f8140a62c0404fd536434e3`.
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41895372665
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41895364400
+
+## Independent Build adapter packaging
+
+Verified the twenty source-checkpoint blobs before adaptation. The five packaged
+adapters preserve public commit/blob lineage and use relative imports. A reader
+flag recheck has 42 callback-change subcases. All 109 Build fixtures passed on
+the host and pinned actual Python 3.7; all 32 packaging tests passed, including
+compilation and inert isolated imports under both interpreters. Independent
+read-only review found no actionable issue in this twelve-file packaging slice.
+
+The archive has seventeen modules and thirty-four members. Its SHA-256 is
+`78a5f5b703cfbf323650a7af9de7013176e6463cd312d2f2798579f136c28322`.
+This is fixture/package evidence only, not owner/transport re-review or native
+qualification. No actual game, profile, desktop or native process was accessed.
+
+## Retained-object Build transform route (schema 4)
+
+The standalone route now joins exact capture/transform requests to the existing
+shared queue, transport, process-bound peer, sanitized durable journal and owner
+runtime. It retains the actual selected object, consumes selection lifetimes,
+and preserves cross-schema request conflicts and unresolved-mutation barriers.
+A focused new-path review identified numeric-spelling aliases and callback-time
+hook replacement; both were fixed and covered by adversarial fixtures. This
+review is not the previously denied owner/transport re-review.
+
+The configured local suite collected 1,659 tests: 1,643 passed and sixteen
+Windows-only fixtures skipped. All 32 package fixtures passed with the pinned
+actual Python 3.7 compiler, including inert archive imports. The focused protocol,
+shared integration and runtime tests passed 22 on the host; actual Python 3.7
+passed sixteen with six host-only skips. Retained-selection/direct-transform
+fixtures also passed on actual Python 3.7. The rebuilt installed wheel passed
+34 isolated no-site tests; all fifty Python members matched source.
+
+Wheel SHA-256: `c2c797cbb35233ef47419441326351c758f03cc7627cd9be7808ea0344ede653`
+(185,881 bytes). The 21-module / 42-member companion archive SHA-256 is
+`fe18fba1fe1bad4a71cb6649c6921640ef7d5d5a021937a2895012f65d0c0341`
+(455,853). No game, user profile or native process was accessed.
+
+The route has no production provider, installation or live qualification. A
+native transform/readback remains an unverified mutation, without verified undo
+or transaction semantics. Exact-head CI for this source checkpoint is pending.
+See [BUILD_TRANSFORM_ROUTE.md](BUILD_TRANSFORM_ROUTE.md) for integration interfaces,
+required bindings, single-dispatch behavior and remaining unsupported operations.
