@@ -141,8 +141,10 @@ rather than declaring successful closure. No reset/rebind/restart method exists.
 
 History is volatile. Process loss or exhaustion requires external durable
 reconciliation and an explicitly established new host session, never a restart
-used to evade uncertainty. That durable/security/provider integration remains
-absent, so no live deployment is offered.
+used to evade uncertainty. The separate [offline client ledger](COMPANION_JOURNAL.md) now persists exact
+submission/attempt/receipt history, but it is not wired to this transport and
+supplies no shared history anchor or independent verifier. The live durable,
+security and provider integration remains absent, so no deployment is offered.
 
 ## Synthetic validation
 

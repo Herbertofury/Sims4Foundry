@@ -10,6 +10,7 @@ Do not close the task merely because simulator or generic Windows CI passes.
 |---|---|---|---|
 | Typed semantic contracts | 45 initial operations | Python tests | No |
 | Plan/execute/reconcile | Synthetic model | Python tests and crash/lock checks | No |
+| Companion client intent/receipt ledger | Bounded immutable history and default-denied injected callback seam | Fabricated temp-file/process-crash/publication-failure tests | No |
 | Mod inventory/diff/staging | Real local file operations | Synthetic artifacts | No gameplay/compatibility claim |
 | DBPF resource ownership audit | Bounded header/index parser and exact TGI overlap report | Fabricated packages on Windows/Linux CI | No content/load-order/compatibility claim |
 | Apex source migration inventory | AST-only read | Historical source snapshot | Not an input adapter |
@@ -65,7 +66,7 @@ Only after this evidence is reviewed should a separate single-action test begin.
 
 ## Still required engineering
 
-- Complete the independently admitted mod-neutral host around the source-only transport/owner queue/native bindings. Process epoch and zone/household/save preconditions are carried across the boundary; peer key-possession hooks exist, but secure key provisioning, qualified channel/peer policy, live admission, scheduling and durable reconciliation are not implemented.
+- Complete the independently admitted mod-neutral host around the source-only transport/owner queue/native bindings. Process epoch and zone/household/save preconditions are carried across the boundary; peer key-possession hooks exist, but secure key provisioning, qualified channel/peer policy, live admission, scheduling and live durable reconciliation are not implemented. The offline client ledger stores exact intent and receipt history, but has no transport wiring, shared history anchor or independent outcome verifier; see [COMPANION_JOURNAL.md](COMPANION_JOURNAL.md).
 - A separately qualified external menu/input provider, including scroll/drag/keys.
 - Integrate the cooperative process-lifetime lease with a shared durable journal and detect nonparticipating user/Apex/other-tool interference. A lease alone does not authorize input.
 - Windows crash-durable pre-dispatch evidence ordering.

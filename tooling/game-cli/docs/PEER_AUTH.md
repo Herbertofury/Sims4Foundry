@@ -144,7 +144,9 @@ Authentication does not resolve uncertain application outcomes. Retain the
 transport's no-replay rules: after an uncertain exchange, consult the exact
 original receipt under a fresh authenticated connection, never replace an ID or
 session to try again. An authenticated receipt is still only an adapter assertion,
-not independent game evidence or proof of save persistence.
+not independent game evidence or proof of save persistence. The separate
+[offline client ledger](COMPANION_JOURNAL.md) stores no peer keys, nonces or proofs,
+and does not connect these hooks to a production executor.
 
 ## Reproducible isolated validation
 

@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 459 tests collected, 450 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, two additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 519 tests collected, 510 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, two additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -143,3 +143,20 @@ regressions cover every partial-response cutoff, EOF/reset/abort variants and
 send/shutdown failure without retry; malformed success/extra frames, timeouts and
 unrelated errors remain failures. Queue/record/submission counts must remain zero.
 Production authentication and codecs were unchanged.
+
+At corrected branch head 0cf5fe80e3e0b3154d5f7b7fb2ae2a8d52e7b253, all four
+Windows/Linux Python 3.11/3.13 jobs passed, including native exclusive-bind
+collision rejection and the peer-auth regressions. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41812882523
+
+The source-only durable client journal adds 60 passing local regressions. Tests
+cover immutable intent before exchange, receipt-only reconciliation, process
+death, partial publication, callback reentrancy, competing processes/instances,
+strict history bounds, terminal immutability and diagnostic redaction. A separate
+review prompted fixes for token-shaped reason leakage, admission exception text
+and malformed-storage traceback text. Adapter assertions never resolve a game
+mutation or become independent evidence. The full local suite above passes;
+the new journal's native Windows filesystem/locking tests still require CI.
+There is no production executor or cross-workspace trusted history anchor, and
+Windows power-loss durability remains unqualified. See
+[COMPANION_JOURNAL.md](COMPANION_JOURNAL.md).

@@ -94,3 +94,12 @@ backend operation must be bounded and the eventual host must supervise cleanup.
 The pure runner itself cannot guarantee release after a native hang or process
 termination. Runtime validation repeats timing, path-distance and wheel viewport
 limits so direct packet construction does not bypass encoder policy.
+
+## Source-only companion client ledger
+
+The separate [companion journal](COMPANION_JOURNAL.md) now preserves exact
+schema-2 intents, callback attempts and receipt claims across client restart.
+It is not the synthetic engine, a transport executor or independent game evidence.
+Its default-denied injected seam cannot promote qualification; adapter-returned
+mutations remain unresolved. Shared cross-workspace history, a real admitted host,
+independent verification and Windows power-loss qualification are still absent.
