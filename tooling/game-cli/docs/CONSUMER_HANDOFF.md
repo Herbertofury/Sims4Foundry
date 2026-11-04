@@ -90,6 +90,11 @@ run it, and does not turn on companion control. The next qualification step is
 to establish Foundry's actual loader entry and startup/tick relationship without
 Apex. See [STARTUP_PROBE_BUILD.md](STARTUP_PROBE_BUILD.md).
 
+`startup-probe-report` now provides the read-only consumer for that diagnostic's
+explicit report and build manifest. Supply the original run ID and an expected
+PID from an independent source. Consistency is not game authority; missing
+evidence remains unknown. See [STARTUP_PROBE_REPORT.md](STARTUP_PROBE_REPORT.md).
+
 Host integration also has a bounded Windows connected-socket ownership observer.
 It matches the server-side established loopback four-tuple to an independently
 retained target process, instead of treating an HMAC key or port as PID proof.

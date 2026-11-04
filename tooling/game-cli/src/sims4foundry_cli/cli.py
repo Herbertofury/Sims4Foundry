@@ -44,6 +44,12 @@ def parser():
     probe_build.add_argument("--probe-output", required=True, help="Explicit new Windows external .json evidence filename for a later authorized run")
     probe_build.add_argument("--seconds", type=float, default=30.0)
     probe_build.add_argument("--manifest-output")
+    probe_report = commands.add_parser("startup-probe-report", help="Inspect explicit startup self-report files; never qualify or contact a game")
+    probe_report.add_argument("--report", required=True)
+    probe_report.add_argument("--manifest", required=True)
+    probe_report.add_argument("--run-id", required=True)
+    probe_report.add_argument("--expected-pid", required=True, type=int)
+    probe_report.add_argument("--archive")
     for domain in ("game", "cas", "live", "build"):
         semantic = commands.add_parser(domain, help="Plan a typed operation (does not execute it)")
         semantic.add_argument("action", choices=[key.split(".", 1)[1] for key in CATALOG if key.startswith(domain + ".")])
@@ -152,6 +158,11 @@ def parser():
 
 
 def run(args):
+    if args.command == "startup-probe-report":
+        from .startup_probe_report import inspect_startup_probe
+        return inspect_startup_probe(args.report, args.manifest,
+                                     expected_run_id=args.run_id, expected_pid=args.expected_pid,
+                                     archive_path=args.archive)
     if args.command == "capabilities":
         return capabilities(args.backend, args.source_details)
     if args.command == "companion-build":

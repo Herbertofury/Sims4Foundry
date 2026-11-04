@@ -57,6 +57,9 @@ with the [consumer handoff](docs/CONSUMER_HANDOFF.md).
 - A deterministic standalone [companion archive builder](docs/COMPANION_BUILD.md)
   using an explicitly pinned trusted Python 3.7 compiler, with new external output
   and a separate completion manifest. It compiles without executing companion code.
+- A bounded read-only [startup probe report inspector](docs/STARTUP_PROBE_REPORT.md)
+  correlating explicit report/manifest files, run ID and expected PID without
+  promoting self-reported data into loader, profile, owner or game authority.
 - An explicit one-shot [owner runtime](docs/OWNER_RUNTIME.md) connecting the neutral
   transport to the original-first game tick and narrow native/Live executors.
   Production admission and automatic startup are not supplied by the archive.

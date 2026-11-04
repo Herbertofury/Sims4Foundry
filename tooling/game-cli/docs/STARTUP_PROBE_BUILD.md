@@ -61,3 +61,12 @@ competing archive writer during compilation. The configured actual Python 3.7 co
 also compiles the repository diagnostic without executing it. The entry execution
 test uses only a fabricated `start` function, not a game or the real diagnostic.
 Runtime tests and Windows CI are recorded separately; none establish game loading.
+
+
+## Inspect a returned diagnostic
+
+The read-only `startup-probe-report` command checks explicit report/manifest
+files against the original run ID and an independently supplied expected PID.
+It can compare optional archive bytes, but never promotes a self-report into
+loader, owner-thread, profile or game authority. See
+[STARTUP_PROBE_REPORT.md](STARTUP_PROBE_REPORT.md).

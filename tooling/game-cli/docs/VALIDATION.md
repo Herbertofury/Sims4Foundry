@@ -948,4 +948,31 @@ action occurred. The complete configured local suite collected 1,545 tests:
 1,529 passed and 16 Windows-only fixtures skipped. The rebuilt installed wheel
 passed 224 isolated no-site checks, with all 46 Python archive members matching
 source. Wheel SHA-256: `6da1ee9b29979dc22bef5b40487dbfb8cf6b14feeb8d1ab33498c1b8e5a87ed9`;
-size: 172,433 bytes. Exact-head CI for retirement recovery is pending.
+size: 172,433 bytes. All six jobs in both exact-head workflows passed for
+`259df99cf006fd9d4aba85e77c08cccac99ca9c1`, including the owned Windows fixtures.
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41893191264
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41893178459
+
+
+## Startup diagnostic report consumer
+
+The new read-only host inspector consumes explicit report/manifest files and
+optional archive bytes. Fifteen focused tests and two CLI routing tests pass.
+A producer-generated report is tested against the actual diagnostic runtime
+with owned fake-core state. Independent review generated all eight publishable
+runtime statuses and verified strict rejection of duplicates, denied reads and
+misleading success labels. It identified and verified two fixes: disappearance
+during final stable-read validation now refuses instead of becoming initial
+absence, and compiler patch-version bounds match the builder's current contract.
+The runtime and builder source hashes remained unchanged.
+
+The configured full suite collected 1,562 tests: 1,546 passed and 16 Windows-only
+fixtures skipped. The rebuilt installed wheel passed 241 isolated no-site checks;
+all 47 Python source members matched the checkpoint. Wheel SHA-256:
+`7087f55bdfa25f801dd6155257bad4aefb0b0c1a0db5c3824a32942b545adc0c`;
+size: 177,135 bytes. No actual game, native process or user profile was accessed.
+
+Consistent or forged files do not confer authority: loader/live/game and command
+authorization remain false, while owner/outside-tick authority remains unknown.
+Archive matching is size/hash correlation only, not code authentication or
+execution evidence. Exact-head CI for this addition is pending.
