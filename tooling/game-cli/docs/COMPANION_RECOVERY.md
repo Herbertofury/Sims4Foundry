@@ -70,6 +70,18 @@ limit. Explicit shorter timeout/loss cases keep their original limits. Unexpecte
 journal failures preserve their original exception and attach only bounded test
 callback type/code/errno notes, never exception text, arguments, keys or wire data.
 These test changes do not alter production deadlines or automatic retry behavior.
+The diagnostic also follows at most three exception cause/context links, detects
+cycles, and sanitizes each type/code/errno field. This preserves a wrapped OS-error
+category even when production deliberately suppresses exception-context display.
+It never includes exception messages, notes, traceback locals or protocol data.
+
+The injected post-reply callback-failure case requires the exact intended exception
+object, one accepted reply and a verified fabricated dispatch before testing
+recovery. A pre-reply authentication failure cannot satisfy those assertions.
+Separate injected auth-read reset/timeout cases verify that distinction and the
+sanitized diagnostics through the real wrapper/journal, with no application
+submission, execution or retry. They do not establish the cause of a prior
+intermittent Windows CI authentication failure, which remains unknown.
 
 ## Run
 
@@ -92,7 +104,7 @@ Run the full current-interpreter suite with the same optional environment variab
 PYTHONPATH=src python -B -m unittest discover -s tests -v
 ```
 
-On 2026-11-04, all 17 recovery cases passed in the Linux cloud workspace, including
+On 2026-11-04, all 20 recovery cases passed in the Linux cloud workspace, including
 both actual Python 3.7.17 server cases. These are source integration regressions,
 not game qualification, a production security audit, or Windows runtime evidence.
 They exercise ordinary durable file publication and journal reopening, not power

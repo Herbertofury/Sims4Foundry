@@ -212,7 +212,7 @@ def admit(_message, _ticket):
     return True  # Fabricated local admission only.
 
 
-def callback_diagnostic(error):
+def exception_fields(error):
     """Bounded fabricated-fixture type/code/errno fields, no exception messages."""
     name = type(error).__name__
     if re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]{0,63}', name) is None:
@@ -226,6 +226,35 @@ def callback_diagnostic(error):
         if type(value) is int and -(2**31) <= value < 2**31:
             fields.append('{}={}'.format(name, value))
     return ', '.join(fields)
+
+
+def callback_diagnostic(error):
+    """Keep a bounded causal chain even when production suppresses its display.
+
+    SessionKeyPeer deliberately replaces OS errors with a static PeerAuthError.
+    Python still retains __context__ after ``raise ... from None``. Inspect only
+    sanitized fields here, never exception text, args, notes or traceback locals.
+    This test-only diagnostic neither changes the exception nor retries the call.
+    """
+    parts, seen = [], set()
+    relation = ''
+    for _ in range(3):
+        if id(error) in seen:
+            parts.append(relation + 'cycle')
+            break
+        seen.add(id(error))
+        parts.append(relation + exception_fields(error))
+        cause = getattr(error, '__cause__', None)
+        context = getattr(error, '__context__', None)
+        if cause is not None:
+            relation, error = 'cause: ', cause
+        elif context is not None:
+            relation, error = 'context: ', context
+        else:
+            break
+    else:
+        parts.append('chain truncated')
+    return '; '.join(parts)
 
 
 @contextmanager
@@ -416,6 +445,18 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(FoundryError) as caught:
             callback()
         self.assertEqual(expected, caught.exception.code)
+        return caught.exception
+
+    def assert_injected_callback_failure(self, expected, callback):
+        error = self.assert_code('exchange_uncertain',
+                                 lambda: self.with_callback_diagnostics(callback))
+        # The journal intentionally maps every callback failure to uncertainty.
+        # That broad code alone cannot establish that our post-reply fault ran.
+        # A boolean identity assertion avoids repr() of unexpected exceptions.
+        self.assertTrue(error.__context__ is expected,
+                        'Injected post-reply failure was not reached; callback: '
+                        + callback_diagnostic(error.__context__))
+        return error
 
     def assert_blocked(self):
         forbidden = Mock(side_effect=AssertionError('A replacement mutation reached transport.'))
@@ -536,14 +577,17 @@ class RecoveryTests(unittest.TestCase):
 
     def test_callback_failure_after_actual_reply_and_dispatch_never_resubmits(self):
         fixture = self.fixture()
-        exchange, replies = self.exchange(fixture), []
+        exchange, replies, dispatches = self.exchange(fixture), [], []
+        failure = RuntimeError('FABRICATED-CALLBACK-FAILURE')
         def fail_after_reply(message, ticket):
             replies.append(exchange(message, ticket))
-            fixture.tick()
-            raise RuntimeError('FABRICATED-CALLBACK-FAILURE')
-        self.assert_code('exchange_uncertain', lambda: self.journal.submit_once(
+            dispatches.append(fixture.tick())
+            raise failure
+        self.assert_injected_callback_failure(failure, lambda: self.journal.submit_once(
             self.item, authorize=admit, exchange=fail_after_reply))
+        self.assertEqual(1, len(replies))
         self.assertEqual('accepted', replies[0]['state'])
+        self.assertEqual(['verified'], dispatches)
         self.assertEqual([], self.exchange_errors)
         self.assertEqual(1, fixture.stats()['executions'])
         self.assertTrue(self.assert_no_replay().uncertainty_latched)
@@ -552,6 +596,61 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(1, fixture.stats()['executions'])
         self.assertEqual(['submit', 'receipt_read'], [x['kind'] for x in fixture.stats()['messages']])
         self.assertNotIn('FABRICATED-CALLBACK-FAILURE', ''.join(p.read_text() for p in (self.root / 'records').iterdir()))
+
+    def test_prereply_auth_reset_cannot_satisfy_postreply_callback_fault(self):
+        fixture = self.fixture()
+        exchange, replies = self.exchange(fixture), []
+        failure = RuntimeError('FABRICATED-CALLBACK-FAILURE')
+        private = 'FABRICATED-PRIVATE-AUTH-ERROR'
+        reset = ConnectionResetError(errno.ECONNRESET, private)
+        def fail_after_reply(message, ticket):
+            replies.append(exchange(message, ticket))
+            fixture.tick()
+            raise failure
+        # Use the real auth wrapper and journal, injecting only a client auth
+        # read failure. This is a diagnostic probe, not a claimed OS failure.
+        with patch.object(companion_auth, '_read', side_effect=reset), self.assertRaises(AssertionError) as caught:
+            self.assert_injected_callback_failure(failure, lambda: self.journal.submit_once(
+                self.item, authorize=admit, exchange=fail_after_reply))
+        diagnostic = ('type=PeerAuthError, code=peer_auth_failed; context: '
+                      'type=ConnectionResetError, errno={}'.format(errno.ECONNRESET))
+        self.assertIn(diagnostic, str(caught.exception))
+        self.assertNotIn(private, str(caught.exception))
+        self.assertEqual([], replies)
+        self.assertEqual(1, len(self.exchange_errors))
+        self.assertEqual(diagnostic, callback_diagnostic(self.exchange_errors[0]))
+        self.assertTrue(self.exchange_errors[0].__context__ is reset)
+        self.assertEqual(1, len(self.calls))
+        self.assertEqual([], fixture.stats()['messages'])
+        self.assertEqual(0, fixture.stats()['submissions'])
+        self.assertEqual(0, fixture.stats()['executions'])
+        self.assertIsNone(fixture.tick())
+        status = self.assert_no_replay()
+        self.assertEqual('unknown', status.state)
+        self.assertTrue(status.uncertainty_latched)
+        self.assert_blocked()
+
+    def test_prereply_auth_timeout_note_preserves_underlying_category(self):
+        fixture = self.fixture()
+        private = 'FABRICATED-PRIVATE-AUTH-ERROR'
+        timeout = socket.timeout(private)
+        # The existing reply-gate case still exercises an actual socket timeout.
+        # This injected auth read failure pins the suppressed-context diagnostic.
+        with patch.object(companion_auth, '_read', side_effect=timeout), self.assertRaises(FoundryError) as caught:
+            self.submit(fixture)
+        self.assertEqual('exchange_uncertain', caught.exception.code)
+        self.assertEqual(['Owned loopback fixture callback: type=PeerAuthError, code=peer_auth_failed; '
+                          'context: type=TimeoutError'], caught.exception.__notes__)
+        self.assertNotIn(private, ''.join(caught.exception.__notes__))
+        self.assertEqual(1, len(self.exchange_errors))
+        self.assertTrue(self.exchange_errors[0].__context__ is timeout)
+        self.assertEqual(1, len(self.calls))
+        self.assertEqual([], fixture.stats()['messages'])
+        self.assertEqual(0, fixture.stats()['submissions'])
+        self.assertEqual(0, fixture.stats()['executions'])
+        self.assertIsNone(fixture.tick())
+        self.assertTrue(self.assert_no_replay().uncertainty_latched)
+        self.assert_blocked()
 
     def test_adapter_exception_is_unknown_and_receipt_reads_never_dispatch(self):
         fixture = self.fixture()
@@ -705,6 +804,33 @@ class RecoveryTests(unittest.TestCase):
         error = OSError(errno.ECONNRESET, private)
         self.assertEqual('type=ConnectionResetError, errno={}'.format(errno.ECONNRESET),
                          callback_diagnostic(error))
+
+    def test_callback_diagnostics_bound_causal_chains_and_cycles(self):
+        private = 'FABRICATED-PRIVATE-DATA-' * 1000
+        outer = companion_auth.PeerAuthError('peer_auth_failed', private)
+        inner = OSError(errno.ECONNRESET, private)
+        inner.winerror = 10054
+        outer.__context__ = inner
+        outer.__suppress_context__ = True
+        outer.add_note(private)
+        self.assertEqual('type=PeerAuthError, code=peer_auth_failed; context: '
+                         'type=ConnectionResetError, errno={}, winerror=10054'.format(errno.ECONNRESET),
+                         callback_diagnostic(outer))
+        cause = RuntimeError(private)
+        outer.__cause__ = cause
+        self.assertEqual('type=PeerAuthError, code=peer_auth_failed; cause: type=RuntimeError',
+                         callback_diagnostic(outer))
+        cause.__context__ = outer
+        self.assertEqual('type=PeerAuthError, code=peer_auth_failed; cause: type=RuntimeError; context: cycle',
+                         callback_diagnostic(outer))
+        cause.__context__ = ValueError(private)
+        cause.__context__.__context__ = inner
+        self.assertEqual('type=PeerAuthError, code=peer_auth_failed; cause: type=RuntimeError; '
+                         'context: type=ValueError; chain truncated', callback_diagnostic(outer))
+        cause.__context__.__context__ = None
+        self.assertEqual('type=PeerAuthError, code=peer_auth_failed; cause: type=RuntimeError; '
+                         'context: type=ValueError', callback_diagnostic(outer))
+        self.assertNotIn(private, callback_diagnostic(outer))
 
     def test_actual_python37_reply_loss_recovery(self):
         self.run_lost_reply('drop', process=True)

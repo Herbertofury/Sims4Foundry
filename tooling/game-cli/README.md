@@ -19,6 +19,8 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
   without importing or unmarshalling members or inferring the game runtime.
 - Bounded DBPF 2.1 resource-index inspection and exact type/group/instance
   overlap reports for explicitly selected packages, without extracting resources.
+- Read-only package update comparisons that distinguish stored resource bytes,
+  indexed metadata and layout changes, without a compatibility or safety verdict.
 - Read-only EA launch metadata preparation using the exact installation and a
   successful account Play record. It does not launch or write a cache.
 - Pure click/right-click, navigation-key, wheel and drag packet constructors plus
@@ -165,6 +167,22 @@ Auditing is bounded to 128 packages, 1 GiB of source bytes and 16,384 entries.
 Repeated exact type/group/instance keys identify competing resource owners, not
 load order or a safe merge. Only equal whole-package hashes establish identical
 package bytes; equal resource metadata does not establish equal resource bodies.
+
+To compare resource bytes between two explicitly selected package versions:
+
+```sh
+foundry-game mods resource-diff --before ./old/Example.package --after ./candidate/Example.package --output ./resource-diff.json
+```
+
+The report matches exact resource keys and hashes their opaque stored ranges.
+Added/removed keys and independent byte, metadata and layout changes are sorted
+by key; unchanged common rows are counted without repeating their bodies.
+Whole-package differences can come from unindexed bytes or header fields, and
+different compressed bytes do not prove different decoded content. The complete
+report is bounded and sources are reverified before any new output is written.
+No resources are extracted or decompressed. Exit zero means a report was generated,
+not that the update is compatible or safe to install. See
+[resource comparison](docs/RESOURCE_DIFF.md).
 
 For a bounded bytecode-header report from a selected script candidate:
 

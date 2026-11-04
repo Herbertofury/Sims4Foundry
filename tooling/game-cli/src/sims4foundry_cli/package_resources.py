@@ -135,7 +135,7 @@ def _read_exact(stream, offset, size):
     return bytes(data)
 
 
-def _hash_source(stream, expected_size):
+def _hash_source(stream, expected_size, chunk_callback=None):
     """Opaque streaming hashing, with no unbounded read even if a file grows."""
     stream.seek(0)
     checksum = hashlib.sha256()
@@ -145,6 +145,8 @@ def _hash_source(stream, expected_size):
         if not chunk:
             _changed()
         checksum.update(chunk)
+        if chunk_callback is not None:
+            chunk_callback(expected_size - remaining, chunk)
         remaining -= len(chunk)
     if stream.read(1):
         _changed()
@@ -269,6 +271,15 @@ def _bounded_result(result):
 
 def inspect_resources(path):
     """Return validated index metadata, not gameplay/content compatibility."""
+    return _inspect_resources(path)[0]
+
+
+def _inspect_resources(path, collector_factory=None):
+    """Return the original report and optional separately collected details.
+
+    The private collector sees only validated rows and second-pass chunks, not
+    a path or stream. Accept its result only after the parser's source checks.
+    """
     path = _source_path(path)
     before_stat = _source_stat(path)
     size = before_stat["bytes"]
@@ -281,11 +292,27 @@ def inspect_resources(path):
             _changed()
         raw_index = _read_exact(stream, metadata["offset"], metadata["bytes"]) if metadata["bytes"] else b""
         resources = _parse_index(raw_index, metadata, size)
-        after_hash = _hash_source(stream, size)
+        collector = collector_factory(resources) if collector_factory is not None else None
+        if collector is None:
+            # Preserve the original call shape for existing callers and mocks.
+            after_hash = _hash_source(stream, size)
+        else:
+            def observe(offset, chunk):
+                # Bind the parsed header/index to the hash-producing pass, even
+                # if a temporary metadata edit was hidden from stat checks.
+                view = memoryview(chunk)
+                for start, raw in ((0, header), (metadata["offset"], raw_index)):
+                    first, last = max(offset, start), min(offset + len(chunk), start + len(raw))
+                    if first < last and view[first - offset:last - offset] != raw[first - start:last - start]:
+                        _changed()
+                collector.feed(offset, chunk)
+
+            after_hash = _hash_source(stream, size, observe)
         _check_source(path, stream, before_stat, descriptor_stat)
         if after_hash != before_hash:
             _changed()
-    return _bounded_result({"ok": True, "schema": 1, "kind": "foundry_package_resources",
+        details = collector.finish() if collector is not None else None
+    report = _bounded_result({"ok": True, "schema": 1, "kind": "foundry_package_resources",
                             "source": str(path), "name": path.name, "bytes": size, "sha256": before_hash,
                             "source_stat": before_stat, "dbpf_version": "2.1",
                             "validation": "bounded_header_and_index", "index": metadata,
@@ -294,6 +321,7 @@ def inspect_resources(path):
                             "resource_contents_validated": False, "decompressed": False,
                             "code_executed": False, "game_modified": False,
                             "compatibility_verified": False})
+    return report, details
 
 
 def _verify_snapshot(report):

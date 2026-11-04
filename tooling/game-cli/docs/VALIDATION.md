@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 900 tests collected, 886 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 944 tests collected, 930 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -563,3 +563,47 @@ thresholds and the remaining integration contract.
 Independent review found no blocking issues. Six extra adversarial probes passed
 on both runtimes, including deferred completion under lock contention; six
 actual cross-runtime frames passed type-aware roundtrips in each direction.
+
+At observation-budget head d4c04a70aefde3b21479351d7bb17ad33959a462, all six
+push jobs and five of six PR jobs passed. Every new observation-boundary test
+passed in the inspected Windows 3.14 PR log (900 collected, 10 skips). The
+Windows 3.11 PR job failed two existing recovery tests: one masked an absent
+reply with IndexError; the other recorded peer_auth_failed before expected
+dispatch. This checkpoint is not fully green. The root cause is being investigated;
+no production authentication or deadline policy has been relaxed.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41850712880
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41850725708
+
+The resource-update comparison adds 41 offline tests. It hashes validated opaque
+stored ranges during the existing second same-handle source pass, binds parsed
+header/index slices to that pass, and rechecks both snapshots before output.
+Exact keys determine additions/removals; changed common rows independently flag
+stored-byte, metadata and layout changes. Unchanged rows remain counted, and
+oversized complete reports refuse without truncation. Same-path/hardlink version
+comparisons are allowed without changing overlap-owner rejection.
+
+The 177 focused resource/mod/CLI regressions and full local suite above pass.
+Tests include maximum-entry unchanged inputs, opaque compressed bytes, tiny
+chunk boundaries, hidden-stat metadata restoration, source drift and CLI
+publication protections. No resource decoding, installation or game access was
+performed. Independent review and exact-head hosted CI are pending.
+Independent resource-diff review found no reproducible defect. Separate probes
+covered 240 generated comparison pairs, 1,000 range/chunk partitions, 100 short-
+read cases, 300 mutated fixtures, one-byte metadata-binding attacks, and 80
+old/new public-report comparisons. These remain offline synthetic evidence.
+
+A test-only recovery correction now requires the exact injected post-reply
+exception, one accepted reply and one verified fabricated dispatch. Pre-reply
+authentication errors can no longer satisfy that case or become an empty-list
+IndexError. Three extra regressions exercise auth-read reset/timeout injection and
+bounded, cycle-safe cause/context diagnostics. Only sanitized type/code/errno
+fields are retained, never raw exception text or protocol data. All 20 focused
+recovery tests pass, including both actual Python 3.7 server cases. The original
+Windows authentication failure's underlying cause remains unknown; production
+authentication, timeouts, no-replay and mutation policy are unchanged.
+
+The final combined local suite passes all 944 collected cases with 14 Windows-only
+skips. Recovery-only independent review also passes all 20 cases and three
+no-socket diagnostic probes, including exact exception identity and bounded
+message-free causal inspection. New exact-head CI is required for this combined
+checkpoint; the preceding Windows authentication cause is not claimed resolved.

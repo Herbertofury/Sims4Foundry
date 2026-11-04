@@ -4,7 +4,7 @@ from dataclasses import asdict
 import json
 import sys
 from . import __version__
-from . import apex, mods, windows, workflows, launch, discovery, package_resources, bytecode_headers
+from . import apex, mods, windows, workflows, launch, discovery, package_resources, bytecode_headers, resource_diff
 from .catalog import CATALOG, capabilities
 from .engine import Session, create_session
 from .companion_journal import Journal
@@ -80,6 +80,10 @@ def parser():
     overlaps = sub.add_parser("overlaps", help="Report shared resource keys without guessing load order or compatibility")
     overlaps.add_argument("--file", action="append", required=True)
     overlaps.add_argument("--output")
+    resource_compare = sub.add_parser("resource-diff", help="Compare exact resource keys and opaque stored bytes; not update safety")
+    resource_compare.add_argument("--before", required=True)
+    resource_compare.add_argument("--after", required=True)
+    resource_compare.add_argument("--output")
     compare = sub.add_parser("compare")
     compare.add_argument("--before", required=True)
     compare.add_argument("--after", required=True)
@@ -139,6 +143,11 @@ def run(args):
     if args.command == "capture":
         return windows.capture(read_json(args.identity), args.ffmpeg, args.ffmpeg_sha256, args.destination)
     if args.command == "mods":
+        if args.action == "resource-diff":
+            result = resource_diff.compare_resources(args.before, args.after)
+            if args.output:
+                new_json(external_path(args.output), result)
+            return result
         if args.action == "bytecode":
             result = bytecode_headers.inspect_headers(args.file, args.target_magic)
             if args.output:

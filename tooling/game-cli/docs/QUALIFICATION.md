@@ -90,7 +90,9 @@ Only after this evidence is reviewed should a separate single-action test begin.
   refuse whole oversized reads explicitly. Journal receipt digests cannot recover
   observation bodies. No reader-to-transport route is implemented.
 - Reviewed, reversible mod installation/update/rollback on a closed disposable
-  profile. Staging currently stops before installation.
+  profile. Staging currently stops before installation. The read-only
+  [resource comparison](RESOURCE_DIFF.md) reports opaque stored-byte and index
+  changes only; it does not decode resources or admit a candidate for installation.
 - Coverage expansion beyond the initial operation catalog, driven by real tasks.
 
 Normal OS consent/security prompts remain real boundaries. Do not change UAC,
