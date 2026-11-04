@@ -35,9 +35,10 @@ def inspect_artifact(path):
                     raise FoundryError("archive_bounds", "Script archive exceeds entry or expanded-size bounds.")
                 names = set()
                 for row in rows:
-                    name = row.filename
-                    parts = PurePosixPath(name).parts
-                    if not safe_relative(name.rstrip("/")):
+                    # ZipInfo normalizes backslashes on Windows and truncates NUL.
+                    # Inspect the original archived spelling, not its sanitized alias.
+                    name = row.orig_filename
+                    if name != row.filename or not safe_relative(name.rstrip("/")):
                         raise FoundryError("archive_path", "Script archive contains an unsafe member path.")
                     if name.casefold() in names:
                         raise FoundryError("archive_duplicate", "Script archive contains duplicate/case-colliding paths.")

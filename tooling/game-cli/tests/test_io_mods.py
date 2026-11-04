@@ -127,6 +127,20 @@ class ModTests(unittest.TestCase):
                 with self.assertRaises(FoundryError):
                     mods.inspect_artifact(self.script)
 
+    def test_zipinfo_sanitization_cannot_hide_unsafe_name(self):
+        row = zipfile.ZipInfo("a/b.py")
+        row.orig_filename = "a\\b.py"
+        row.file_size = 1
+        row.compress_size = 1
+        archive = mock.MagicMock()
+        archive.__enter__.return_value = archive
+        archive.infolist.return_value = [row]
+        with mock.patch("sims4foundry_cli.mods.zipfile.ZipFile", return_value=archive):
+            with self.assertRaises(FoundryError) as caught:
+                mods.inspect_artifact(self.script)
+        self.assertEqual("archive_path", caught.exception.code)
+        archive.testzip.assert_not_called()
+
     def test_archive_case_collision_rejected(self):
         with zipfile.ZipFile(self.script, "w") as archive:
             archive.writestr("A.py", "1")
