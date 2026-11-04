@@ -21,7 +21,7 @@ found the following in its compiled modules:
 
 - `server_commands/placement_commands.pyc` constructs a world routing
   surface, `Vector3`, yaw quaternion, `Transform` and `Location`, then
-  calls `placement.test_location_for_object(obj, location=location)`.
+  calls `build_buy.test_location_for_object(obj, location=location)`.
 - `server_commands/object_commands.pyc` uses `move_to` with the keyword
   arguments `routing_surface`, `translation`, and `orientation`.
 
@@ -40,7 +40,7 @@ The host supplies:
   explicitly admits this exact request and its object, save, lot and profile.
 - Already supplied native factories for `Vector3`,
   `angle_to_yaw_quaternion`, `SurfaceIdentifier`, `Transform`, `Location`
-  and `placement.test_location_for_object`, plus the world surface type.
+  and `build_buy.test_location_for_object`, plus the world surface type.
 - Independent process/profile ownership, zone generation, durable intent and
   result journaling, expiration, and reconciliation across process restart.
 
