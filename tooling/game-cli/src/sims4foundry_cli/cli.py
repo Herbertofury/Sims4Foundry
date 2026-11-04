@@ -4,6 +4,7 @@ from dataclasses import asdict
 import json
 import sys
 from . import __version__
+from . import neutral_testmods, neutral_profile, neutral_launch, neutral_ea_consent, neutral_launch_recovery, neutral_records
 from . import apex, mods, windows, workflows, launch, discovery, package_resources, bytecode_headers, resource_diff
 from .catalog import CATALOG, capabilities
 from .engine import Session, create_session
@@ -110,6 +111,40 @@ def parser():
     stage.add_argument("--manifest", required=True)
     stage.add_argument("--destination", required=True)
     stage.add_argument("--execute", action="store_true", help="Copy into a new external staging directory, never a profile")
+    game_launch = commands.add_parser("game-launch", help="Launch EA once using an active prepared test profile")
+    game_launch.add_argument("--game-root", required=True)
+    game_launch.add_argument("--ea-log", required=True, action="append")
+    game_launch.add_argument("--executable-sha256", required=True)
+    game_launch.add_argument("--ea-launcher", required=True)
+    game_launch.add_argument("--launcher-sha256", required=True)
+    game_launch.add_argument("--profile-session", required=True)
+    game_launch.add_argument("--session", required=True)
+    game_launch.add_argument("--seconds", type=float, default=30.0)
+    ea_context = commands.add_parser("game-launch-ea-context", help="Read a fresh EA request for an existing handoff")
+    ea_context.add_argument("--session", required=True)
+    ea_context.add_argument("--output")
+    consent = commands.add_parser("game-launch-ea-consent", help="Acknowledge one exact correlated EA launch prompt")
+    consent.add_argument("--session", required=True)
+    consent.add_argument("--ea-image", required=True)
+    consent.add_argument("--ea-sha256", required=True)
+    consent.add_argument("--seconds", type=float, default=20.0)
+    game_observe = commands.add_parser("game-launch-observe", help="Observe an existing launch without dispatching again")
+    game_observe.add_argument("--session", required=True)
+    game_observe.add_argument("--seconds", type=float, default=30.0)
+    game_observe.add_argument("--output")
+    resolve = commands.add_parser("game-launch-reconcile-not-dispatched", help="Resolve only a proven never-dispatched launch; never cancel EA work")
+    resolve.add_argument("--profile-session", required=True)
+    resolve.add_argument("--session", required=True)
+    profile = commands.add_parser("test-profile", help="Prepare and restore an explicit test profile")
+    profile.add_argument("action", choices=("activate", "status", "restore", "recover", "recover-activation"))
+    profile.add_argument("--session", required=True)
+    profile.add_argument("--profile")
+    testmods = commands.add_parser("test-mods", help="Install, inspect, or retire a selected test-mod set")
+    testmods.add_argument("action", choices=("install", "retire", "status"))
+    testmods.add_argument("--session", required=True)
+    testmods.add_argument("--profile")
+    testmods.add_argument("--profile-session", help="Exact activation session required for a Foundry-marked profile")
+    testmods.add_argument("--manifest")
     migration = commands.add_parser("apex-inventory", help="Parse existing Apex CLI without importing it or contacting the game")
     migration.add_argument("--repository", required=True)
     return parser
@@ -206,6 +241,40 @@ def run(args):
         if args.action == "compare":
             return mods.compare(read_json(args.before), read_json(args.after))
         return mods.stage(read_json(args.manifest), args.destination, args.execute)
+    if args.command == "game-launch":
+        return neutral_launch.execute(args.game_root, args.ea_log, args.executable_sha256,
+                                      args.ea_launcher, args.launcher_sha256,
+                                      args.profile_session, args.session, args.seconds)
+    if args.command == "game-launch-ea-context":
+        return neutral_launch.ea_context(args.session, args.output)
+    if args.command == "game-launch-ea-consent":
+        return neutral_ea_consent.acknowledge(args.session, args.ea_image, args.ea_sha256,
+                                              timeout_seconds=args.seconds)
+    if args.command == "game-launch-observe":
+        return neutral_launch.observe(args.session, args.seconds, args.output)
+    if args.command == "game-launch-reconcile-not-dispatched":
+        return neutral_launch_recovery.reconcile_not_dispatched(args.profile_session, args.session)
+    if args.command == "test-profile":
+        if args.action == "activate":
+            if not args.profile:
+                raise FoundryError("missing_arguments", "Activation needs an explicit existing profile.")
+            return neutral_profile.activate(args.profile, args.session)
+        if args.action == "status":
+            return neutral_profile.status(args.session)
+        if args.action == "restore":
+            return neutral_profile.restore(args.session)
+        if args.action == "recover":
+            return neutral_profile.recover(args.session)
+        return neutral_profile.recover_activation(args.session)
+    if args.command == "test-mods":
+        if args.action == "status":
+            return neutral_testmods.status(args.session)
+        if args.action == "retire":
+            return neutral_testmods.retire(args.session)
+        if not args.manifest or not args.profile:
+            raise FoundryError("missing_arguments", "Install needs an explicit profile and inventory manifest.")
+        return neutral_testmods.install(neutral_records.read_json(args.manifest), args.profile, args.session,
+                                        profile_session=args.profile_session)
     if args.command == "apex-inventory":
         return apex.inspect_source(args.repository)
     raise FoundryError("unsupported_command", "Unsupported command.")

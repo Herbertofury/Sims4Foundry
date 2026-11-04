@@ -37,11 +37,27 @@ swap or a compatibility verdict. The explicit bytecode magic is a comparison
 target, not proof of the installed game's interpreter version. Resource bodies
 are not imported, executed, decoded or installed by these inspection commands.
 
+The separately scoped Windows `test-mods install/status/retire` commands can
+install an explicitly selected test set into an authorized closed profile and
+move it out without deleting its bytes. They preserve existing mods and do not
+create a clean profile, establish session ownership or prove game loading. Use
+[TEST_MODS.md](TEST_MODS.md) for the exact commands, record handling and limits.
+
 `discover`, `inspect` and pinned `capture` provide process/window identity and
 WGC/FFmpeg components. Their Windows fixture tests are not Sims qualification.
 Use them only within the consumer task's authorized scope; they are not an
 alternate route around a denied process/profile inspection. `launch-plan` only
 prepares read-only EA metadata and does not launch a game.
+
+The standalone `test-profile` and `game-launch` commands now implement an
+explicit disposable-profile preparation and one-shot EA handoff. Optional
+`game-launch-ea-consent` uses a narrowly scoped Windows UI Automation helper,
+not general Computer Use. These new orchestration paths are fixture-tested,
+not native/game-qualified. Required executable hashes, activation binding,
+recovery commands and sticky reservation limits are in
+[TEST_PROFILE_AND_LAUNCH.md](TEST_PROFILE_AND_LAUNCH.md). Successful or uncertain
+EA handoffs still block restoration; only a proven never-dispatched failure
+has an implemented resolution path.
 
 Independent process termination can now be observed without an Apex bridge:
 

@@ -868,4 +868,50 @@ preservation. No actionable new integration defect was found. This review was
 limited to the new composition and its call contracts; the older final
 owner/transport re-review remains incomplete. The source documents the trusted
 interpreter boundary and does not claim application-frame MAC/encryption or
-real-game qualification. Exact-head CI for this new callback is pending.
+real-game qualification.
+
+Both exact-head CI workflows for callback commit
+`33ac07aa16dfc46c50ec6a2892630b99737549ae` finished with all six jobs green. The
+PR Windows 3.11 job initially failed two existing recovery fixtures with a
+connection abort and authentication-admission timeout. A single rerun passed
+without source changes, including both failing cases. The original failures
+are retained; their underlying cause is not established or claimed fixed.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41884404570
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41884419201
+
+## Neutral profile, test-mod and EA handoff integration
+
+The standalone integration combines the visible test-mod source checkpoint
+`d29e8d50dcc4c74fb1f84a8d2aba31a499480574` with the generated neutral lifecycle
+source handoff and reviewed repairs. No exported private Apex helper source or
+game/account data is included. All commands remain independent of Apex.
+
+The final local suite collected 1,517 tests: 1,501 passed and 16 Windows-only
+fixtures skipped, with the trusted actual Python 3.7 compiler configured. The
+201 neutral tests cover strict record reads, shared locks and durable directory
+identities, exact activation bindings, late process-scan changes, one-shot EA
+handoff/positive receipts, bounded executable reads, helper cancellation and
+precommit deadlines, and proven never-dispatched reconciliation.
+
+Independent EA review passed 73 scoped fixtures plus three closure probes. It
+found and verified fixes for Windows executable stat/fstat normalization and
+consent after a known pre-dispatch failure. Independent lifecycle review passed
+117 scoped fixtures plus five final probes. It found and verified the fix that
+bound test-mod mutation must refuse a pending launch after the lock releases.
+Earlier extra probes also exercised partial receipts and lost acknowledgments.
+
+The installed wheel passed 196 isolated no-site fixture checks, with imported
+package modules and 45 Python archive members checked against the built source.
+Wheel SHA-256: `ee04403423b040170ebc32c0c5a1bac57ba52fa9e9f738f4179c24f9a24878d9`.
+Its size is 170,291 bytes. These fixture checks used owned temporary directories
+and fabricated processes/helpers; no real EA, game or user profile was touched.
+
+Limits remain explicit: successful/uncertain EA handoffs have no automatic
+reservation-release path; only proven pre-dispatch failure can be resolved.
+Generic same-process EA dialog wording is not request-specific ownership.
+Arbitrary removal of marker/provenance followed by plain-profile admission is
+outside the cooperating-command guarantee. An interrupted test-mod retirement
+has status reporting but no resume command in this checkpoint. Native EA,
+Windows UI Automation and actual game orchestration are not qualified. This
+review does not complete the older denied final owner/transport review.
+Exact-head CI for this new integration is pending.

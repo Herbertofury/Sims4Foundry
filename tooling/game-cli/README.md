@@ -64,13 +64,25 @@ with the [consumer handoff](docs/CONSUMER_HANDOFF.md).
   implementations. Their native paths still need controlled Windows/game validation.
 - Standalone [process-exit observation](docs/PROCESS_EXIT.md) through an exact
   retained Windows process handle. It never requests quit or proves a save/normal exit.
+- An explicit standalone Windows [test-profile and one-shot EA launch](docs/TEST_PROFILE_AND_LAUNCH.md)
+  path with hash pins, profile identity binding, shared locks, sticky launch
+  reservations and exact pre-dispatch failure reconciliation. Native EA/game
+  orchestration remains unqualified; uncertain handoffs are never replayed.
+- Explicit Windows [test-mod install/status/retire](docs/TEST_MODS.md) for a selected
+  flat artifact set and authorized closed profile. It preserves unrelated mods,
+  records intent and moves retired test bytes without deletion. Fixture-tested,
+  not a game-loading or clean-profile qualification.
 
 ## What does not work yet
 
-All real semantic actions are **unqualified and refused**. No flag or JSON field can
-turn a simulated result into live qualification. This package does not install a mod,
-change a profile, launch/close a game, drive a cursor, change foreground focus,
-modify security settings, approve UAC, inject a DLL, or execute arbitrary commands.
+Real semantic CAS/Live/Build actions remain **unqualified and refused**. No flag
+or JSON field turns a simulation into live qualification. Explicit `test-mods`
+and `test-profile` commands can change an authorized selected profile; ordinary
+offline staging does not. `game-launch` submits one EA URI handoff, and optional
+EA consent targets one guarded ordinary dialog. Those paths are fixture-tested,
+not game-qualified. The package does not yet complete unattended entry/exit,
+drive a cursor, change foreground focus, modify security settings, approve UAC,
+inject a DLL, or execute arbitrary user commands.
 It does not claim support for every Sims feature merely because a command is listed.
 
 The existing Apex CLI is a distinct, Apex-dependent controller. Its successful
@@ -169,7 +181,8 @@ tree without a completion marker; retrying never overwrites that tree.
 The first staging call is a dry run. Execution requires a never-existing external
 directory, rechecks source hashes, preserves the sources, and writes a completion
 receipt only after every copy matches. An interrupted tree without that receipt is
-incomplete. There is no in-place install command in this checkpoint.
+incomplete. This staging command never installs into a profile. The separate
+explicit [test-mods workflow](docs/TEST_MODS.md) has its own scope and checks.
 
 `mods check` remains signature-only for DBPF packages. For deeper read-only
 inspection of a supported DBPF 2.1 index, use:
