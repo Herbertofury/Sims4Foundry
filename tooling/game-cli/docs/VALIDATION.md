@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- `python -m unittest discover -s tests -v`: 261 tests collected: 254 passed, 7 CI-only Windows fixture tests skipped.
+- `python -m unittest discover -s tests -v`: 306 tests collected: 298 passed, 8 CI-only Windows fixture tests skipped.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -67,3 +67,16 @@ The interpreter is an offline compatibility tool only, not the CLI/runtime serve
 Review also corrected command-module import ordering before mutation admission,
 speed-result verification across save/mode context changes, and Windows liveness
 checks that must not rely on the undefined running-process exit FILETIME.
+
+At remote head 77c1bacf2cafa3f390ec2941cd358a66b7e3fc4d, all four jobs passed,
+including real Windows mutex fixtures. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41804039829
+A CLI wheel from that source tree built, installed into a clean isolated virtual
+environment, and passed the 14-step synthetic workflow. It contains no installable
+game companion. Wheel SHA-256:
+89f27d2045db0ca61779d934dfdb2ef4755bce265d3766f66e656ac1b04fb401.
+
+New passive process discovery has 43 tests plus two CLI-routing tests. Its extra
+native Toolhelp ABI/enumeration test only observes the already-running Python
+process on a disposable Windows CI runner; it launches nothing. That new native
+check is pending CI at this source checkpoint.

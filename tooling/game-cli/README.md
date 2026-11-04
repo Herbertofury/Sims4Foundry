@@ -157,3 +157,15 @@ They are not an installable mod or a working CAS/Build controller. See
 [COMPANION.md](docs/COMPANION.md) for implemented boundaries and missing integration.
 The client also has an offline framed protocol and a cooperative Windows process
 lease. Neither bypasses the live qualification gate or resolves earlier actions.
+
+## Passive process discovery
+
+`foundry-game discover --executable "C:\Games\The Sims 4\Game\Bin\TS4_x64.exe" --executable-sha256 EXACT_HASH`
+
+The Toolhelp name filter only finds candidates. Each still needs exact path/hash,
+process lifetime and owned-window inspection. Inaccessible, changed, disappeared,
+wrong-installation or ambiguous-window candidates remain explicit blockers.
+An `ok: true` report means the inspection returned a complete report, not that its
+`status` is actionable. Neither `none_observed` nor one matching identity proves
+absence, grants launch admission, acquires a lease or qualifies game control.
+See [UI_ADAPTER.md](docs/UI_ADAPTER.md) for the inspected CAS/Build provider limits.

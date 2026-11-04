@@ -12,6 +12,7 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | Plan/execute/reconcile | Synthetic model | Python tests and crash/lock checks | No |
 | Mod inventory/diff/staging | Real local file operations | Synthetic artifacts | No gameplay/compatibility claim |
 | Apex source migration inventory | AST-only read | Historical source snapshot | Not an input adapter |
+| Passive process discovery | Bounded exact candidate reporting | Fake snapshots; native CI enumeration pending | No launch admission |
 | Windows process/window inspection | Query-only implementation | Contract tests and native Windows CI fixture | Pending current game test |
 | WGC capture | Pinned helper implementation | Mock helper plus real PNG validation | Pending current game test |
 | No-Apex click/key/scroll/drag | Pure packet plans and injected runner only | Synthetic guard tests; fixture transport CI pending | No |

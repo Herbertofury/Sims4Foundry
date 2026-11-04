@@ -3,7 +3,7 @@ import argparse
 import json
 import sys
 from . import __version__
-from . import apex, mods, windows, workflows, launch
+from . import apex, mods, windows, workflows, launch, discovery
 from .catalog import CATALOG, capabilities
 from .engine import Session, create_session
 from .errors import FoundryError
@@ -41,6 +41,10 @@ def parser():
     launch_plan.add_argument("--ea-log", required=True, action="append", help="One or two logs in chronological order")
     launch_plan.add_argument("--executable-sha256", required=True)
     launch_plan.add_argument("--output")
+    discover = commands.add_parser("discover", help="Passive bounded process discovery; never launch admission")
+    discover.add_argument("--executable", required=True)
+    discover.add_argument("--executable-sha256", required=True)
+    discover.add_argument("--output")
     inspect = commands.add_parser("inspect", help="Passive, exact Windows process/window identity only")
     inspect.add_argument("--pid", required=True, type=int)
     inspect.add_argument("--executable", required=True)
@@ -101,6 +105,11 @@ def run(args):
         if args.output:
             new_json(external_path(args.output), result)
         return {"ok": True, "identity": result}
+    if args.command == "discover":
+        result = discovery.discover(args.executable, args.executable_sha256)
+        if args.output:
+            new_json(external_path(args.output), result)
+        return result
     if args.command == "capture":
         return windows.capture(read_json(args.identity), args.ffmpeg, args.ffmpeg_sha256, args.destination)
     if args.command == "mods":

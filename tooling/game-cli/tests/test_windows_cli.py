@@ -143,6 +143,21 @@ class CLITests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertFalse(result["real_game_control_ready"])
 
+    def test_discovery_routes_only_to_passive_provider(self):
+        result = {"ok": True, "status": "none_observed", "launch_qualified": False,
+                  "real_game_control_ready": False, "input_sent": False, "absence_proven": False}
+        with mock.patch("sims4foundry_cli.cli.discovery.discover", return_value=result) as provider:
+            code, returned = self.call(["discover", "--executable", "fixture", "--executable-sha256", "a"*64])
+        provider.assert_called_once_with("fixture", "a"*64)
+        self.assertEqual(0, code)
+        self.assertEqual(result, returned)
+
+    def test_discovery_failure_is_structured_nonzero(self):
+        with mock.patch("sims4foundry_cli.cli.discovery.discover", side_effect=FoundryError("discovery_incomplete", "No complete snapshot.")):
+            code, result = self.call(["discover", "--executable", "fixture", "--executable-sha256", "a"*64])
+        self.assertEqual(2, code)
+        self.assertEqual("discovery_incomplete", result["code"])
+
     def test_semantic_command_emits_only_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
             session = str(Path(tmp) / "sim")
