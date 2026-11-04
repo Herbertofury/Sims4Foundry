@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 519 tests collected, 510 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, two additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 542 tests collected, 533 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -160,3 +160,24 @@ the new journal's native Windows filesystem/locking tests still require CI.
 There is no production executor or cross-workspace trusted history anchor, and
 Windows power-loss durability remains unqualified. See
 [COMPANION_JOURNAL.md](COMPANION_JOURNAL.md).
+
+At journal branch head 87fc1855035bc46ff5e881087977a45b842db7a0, all four
+Windows/Linux Python 3.11/3.13 jobs passed, including actual Windows ordinary
+filesystem/byte-range-lock contention, callback reentrancy and crash-release
+tests. These are process-crash tests, not Windows power-loss qualification.
+A clean installation of the exact-source wheel also passed all 14 synthetic
+workflow steps. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41815495665
+
+The recovery batch adds 14 isolated integration tests composing exact durable
+intent, peer authentication, actual loopback sockets and owner-thread dispatch.
+Two use a separate actual Python 3.7.17 server. Controlled dropped replies and
+socket timeouts preserve uncertainty; reopening the journal only permits reads
+of the original receipt, never another submission. History loss, wrong keys,
+process changes and fabricated context mismatches cannot produce an extra
+dispatch. Cleanup checks account for owned server/client threads and processes.
+Nine additional tests cover the passive `companion journal-status` CLI, unchanged
+files, exact selection, missing/corrupt/busy history and the absence of mutation
+or network routes. Both additions passed independent source review and the full
+local suite above; their new exact-head Windows/Linux CI remains to be run.
+See [COMPANION_RECOVERY.md](COMPANION_RECOVERY.md) for the test-only boundaries.

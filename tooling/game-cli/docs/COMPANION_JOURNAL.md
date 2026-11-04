@@ -3,10 +3,22 @@
 `companion_journal.py` is current-client Python 3.11+ source, separate from the
 synthetic engine and the embedded Python 3.7 modules. It supplies durable local
 intent/attempt bookkeeping and a **default-denied injected callback harness**.
-There is no production executor, network integration, CLI execution flag, key
+There is no production executor, production network integration, CLI execution flag, key
 provisioner, game bootstrap, independent outcome verifier or live qualification.
 Importing it does not create files, start a service, open sockets or touch a game.
 All tests use fabricated values in temporary external directories/processes.
+
+The CLI exposes only `foundry-game companion journal-status --directory PATH`
+and its optional exact `--request-id ID` filter. It reads and validates existing
+local history without creating, repairing, submitting, reconciling over a socket
+or deleting anything. Exit zero confirms a successful history read; each entry's
+unresolved/evidence fields remain authoritative about the stored claims. Missing,
+corrupt or busy history returns a nonzero structured error. There are no create,
+submit, reconcile, reset, network-address or live-authorization flags.
+
+The separate [recovery suite](COMPANION_RECOVERY.md) composes the injected journal
+callbacks with real authenticated fixture sockets. It is not production wiring
+or a qualified host policy.
 
 ## Exact intent before possible transmission
 

@@ -1,11 +1,13 @@
 """Structured CLI. All semantic execution is explicitly synthetic in 0.1."""
 import argparse
+from dataclasses import asdict
 import json
 import sys
 from . import __version__
 from . import apex, mods, windows, workflows, launch, discovery, package_resources
 from .catalog import CATALOG, capabilities
 from .engine import Session, create_session
+from .companion_journal import Journal
 from .errors import FoundryError
 from .io import external_path, loads, new_json, read_json
 
@@ -21,6 +23,10 @@ def parser():
     session.add_argument("action", choices=("create", "status", "observe"))
     session.add_argument("--directory", required=True)
     session.add_argument("--backend", choices=("simulation", "windows"), default="simulation")
+    companion = commands.add_parser("companion", help="Read existing local companion history only; no network or execution")
+    companion.add_argument("action", choices=("journal-status",))
+    companion.add_argument("--directory", required=True)
+    companion.add_argument("--request-id", help="Read one existing immutable request; never creates missing history")
     for domain in ("game", "cas", "live", "build"):
         semantic = commands.add_parser(domain, help="Plan a typed operation (does not execute it)")
         semantic.add_argument("action", choices=[key.split(".", 1)[1] for key in CATALOG if key.startswith(domain + ".")])
@@ -89,6 +95,15 @@ def run(args):
         if args.action == "create":
             return create_session(args.directory, args.backend)
         return getattr(Session(args.directory), args.action)()
+    if args.command == "companion":
+        journal = Journal(args.directory)
+        rows = journal.status(args.request_id) if args.request_id is not None else journal.status()
+        if args.request_id is not None:
+            rows = (rows,)
+        return {"ok": True, "scope": "local_companion_journal", "read_only": True,
+                "network_accessed": False, "game_accessed": False,
+                "independent_evidence": False, "live_qualified": False,
+                "entries": [asdict(row) for row in rows]}
     if args.command in ("game", "cas", "live", "build"):
         return Session(args.session).plan(args.command + "." + args.action, loads(args.arguments))
     if args.command == "execute":

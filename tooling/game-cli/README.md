@@ -23,6 +23,10 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
 - Source-only Apex migration inventory. It parses source without importing it.
 - Optional source-backed operation map that distinguishes inspected call sites,
   Apex-only paths and gaps in the bounded review; it grants no live capability.
+- An uninstalled Python-3.7-compatible owner queue and bounded authenticated
+  loopback transport, exercised with fabricated services rather than a game.
+- A restart-safe companion intent/receipt journal and read-only local history
+  inspection. Unknown mutations cannot be retried or cleared through the CLI.
 - Windows-only process/window identity inspection and pinned FFmpeg WGC capture
   implementations. Their native paths still need controlled Windows/game validation.
 
@@ -54,6 +58,14 @@ On PowerShell use `$env:PYTHONPATH = 'src'`.
 
 `capabilities` defaults to the real Windows backend and reports the unqualified
 status clearly. `--backend simulation` reports synthetic availability only.
+
+Inspect an existing companion journal with
+`foundry-game companion journal-status --directory PATH`, optionally selecting
+one stored `--request-id ID`. This reads local history only, never creates a
+journal, contacts the game or network, or resolves uncertainty. Exit zero means
+the history was read successfully, not that a recorded operation succeeded.
+See [companion journal](docs/COMPANION_JOURNAL.md) and the
+[isolated recovery regressions](docs/COMPANION_RECOVERY.md).
 
 ## Exercise the controller without touching a game
 
