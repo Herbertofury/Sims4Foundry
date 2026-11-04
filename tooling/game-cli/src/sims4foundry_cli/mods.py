@@ -3,15 +3,43 @@
 This module never installs into a live profile, downloads, imports, or executes
 mods. A valid hash/archive is not a compatibility or malware-safety verdict.
 """
+import hashlib
 from pathlib import Path, PurePosixPath
-import shutil
 import stat
 import zipfile
 from .errors import FoundryError
 from .io import (digest, exact_fields, exact_int, external_path, new_json,
-                 plain_path, sha256, safe_relative)
+                 plain_path, safe_relative)
 
 MAX_ARTIFACT = 512 * 1024 * 1024
+READ_CHUNK_BYTES = 1024 * 1024
+
+
+def _bounded_chunks(stream, expected_size, code):
+    # A source being updated must not turn a bounded inspection or copy into
+    # an EOF-following stream. The final probe is never yielded or written.
+    remaining = expected_size
+    while remaining:
+        chunk = stream.read(min(remaining, READ_CHUNK_BYTES))
+        if not chunk:
+            raise FoundryError(code, "Artifact size changed during bounded reading.")
+        remaining -= len(chunk)
+        yield chunk
+    if stream.read(1):
+        raise FoundryError(code, "Artifact size changed during bounded reading.")
+
+
+def _hash_artifact(path, expected_size, code="artifact_changed"):
+    checksum = hashlib.sha256()
+    with plain_path(path).open("rb") as stream:
+        for chunk in _bounded_chunks(stream, expected_size, code):
+            checksum.update(chunk)
+    return checksum.hexdigest()
+
+
+def _copy_artifact(source, target, expected_size):
+    for chunk in _bounded_chunks(source, expected_size, "copy_changed"):
+        target.write(chunk)
 
 
 def inspect_artifact(path):
@@ -21,7 +49,7 @@ def inspect_artifact(path):
     size = path.stat().st_size
     if not 4 <= size <= MAX_ARTIFACT:
         raise FoundryError("artifact_size", "Artifact is empty, truncated, or larger than 512 MiB.")
-    before = sha256(path)
+    before = _hash_artifact(path, size)
     if path.suffix.lower() == ".package":
         with path.open("rb") as stream:
             if stream.read(4) != b"DBPF":
@@ -53,7 +81,7 @@ def inspect_artifact(path):
                 inspection = {"kind": "ts4script_zip", "validation": "bounded_members_and_crc", "member_count": len(rows), "code_executed": False}
         except (zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
             raise FoundryError("invalid_script_archive", "Unsupported or invalid script ZIP.") from exc
-    if sha256(path) != before or path.stat().st_size != size:
+    if _hash_artifact(path, size) != before or path.stat().st_size != size:
         raise FoundryError("artifact_changed", "Source changed during inspection; no artifact was accepted.")
     return {"name": path.name, "source": str(path), "bytes": size, "sha256": before, **inspection}
 
@@ -80,7 +108,7 @@ def inventory(directory):
             rows.append(row)
     result = {"schema": 1, "artifacts": rows, "kind": "foundry_mod_inventory", "game_modified": False}
     result["manifest_sha256"] = digest(result)
-    return result
+    return _manifest(result)
 
 
 def _manifest(value):
@@ -92,7 +120,7 @@ def _manifest(value):
         raise FoundryError("manifest_digest", "Inventory digest does not match.")
     if not isinstance(value["artifacts"], list) or len(value["artifacts"]) > 4096:
         raise FoundryError("invalid_manifest", "Artifact list exceeds its bound.")
-    seen = set()
+    seen, parent_paths = set(), set()
     for row in value["artifacts"]:
         if not isinstance(row, dict):
             raise FoundryError("invalid_manifest", "Artifact row is not an object.")
@@ -101,9 +129,18 @@ def _manifest(value):
                 or PurePosixPath(relative).suffix.lower() not in (".package", ".ts4script")
                 or not isinstance(row.get("source"), str) or not row["source"] or "\x00" in row["source"]):
             raise FoundryError("invalid_manifest", "Artifact has an unsafe relative path.")
-        if relative.casefold() in seen:
+        # Validation must match the format at the destination. A digest binds
+        # manifest contents, but does not make a renamed extension trustworthy.
+        if Path(row["source"]).suffix.lower() != PurePosixPath(relative).suffix.lower():
+            raise FoundryError("invalid_manifest", "Source and destination artifact extensions must match.")
+        key = relative.casefold()
+        parents = {str(parent).casefold() for parent in PurePosixPath(relative).parents if str(parent) != "."}
+        if key in seen:
             raise FoundryError("duplicate_artifact", "Manifest contains a duplicate path.")
-        seen.add(relative.casefold())
+        if key in parent_paths or parents & seen:
+            raise FoundryError("artifact_path_conflict", "An artifact path also names a directory; paths must be portable to Windows.")
+        seen.add(key)
+        parent_paths.update(parents)
         checksum = row.get("sha256")
         if not isinstance(checksum, str) or len(checksum) != 64 or any(c not in "0123456789abcdef" for c in checksum) or not exact_int(row.get("bytes"), 4, MAX_ARTIFACT):
             raise FoundryError("invalid_manifest", "Artifact has an invalid size/hash.")
@@ -145,11 +182,11 @@ def stage(manifest, destination, execute=False):
         target = plain_path(destination / "artifacts" / row["relative"])
         target.parent.mkdir(parents=True, exist_ok=True)
         with plain_path(row["source"]).open("rb") as src, target.open("xb") as dst:
-            shutil.copyfileobj(src, dst)
+            _copy_artifact(src, dst, row["bytes"])
             dst.flush()
             import os
             os.fsync(dst.fileno())
-        if target.stat().st_size != row["bytes"] or sha256(target) != row["sha256"]:
+        if target.stat().st_size != row["bytes"] or _hash_artifact(target, row["bytes"], "copy_changed") != row["sha256"]:
             raise FoundryError("copy_changed", "Copied artifact did not match. Staging is incomplete, not installable.", destination=str(destination))
     result = dict(plan, executed=True, staged=True)
     new_json(destination / "staging-complete.json", result)

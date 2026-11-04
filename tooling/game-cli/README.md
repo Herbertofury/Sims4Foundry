@@ -115,6 +115,12 @@ foundry-game mods stage --manifest ./candidate-inventory.json --destination ./st
 foundry-game mods stage --manifest ./candidate-inventory.json --destination ./staged/release-001 --execute
 ```
 
+Staging requires matching source/destination artifact extensions and rejects
+case-insensitive file/directory path conflicts before creating the output tree.
+Hashes are bounded to the observed file size and copies to the inventoried size,
+with one extra read probe that is never written. A changing source leaves an incomplete staging
+tree without a completion marker; retrying never overwrites that tree.
+
 The first staging call is a dry run. Execution requires a never-existing external
 directory, rechecks source hashes, preserves the sources, and writes a completion
 receipt only after every copy matches. An interrupted tree without that receipt is

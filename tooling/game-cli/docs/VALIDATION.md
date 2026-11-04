@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 619 tests collected, 606 passed, 13 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 635 tests collected, 622 passed, 13 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -250,3 +250,21 @@ call. Twenty-one final-hook context-drift cases across speed, quit and CAS now
 refuse before native dispatch; CAS scopes unwind. Independent review and the
 combined local suite above pass. Exact-head Windows/Linux CI remains required
 for this source update.
+
+At boundary-hardening head d1a58017cef607aeb4633cc84d84cecd02a951df, all four
+Windows/Linux Python 3.11/3.13 jobs passed, in both push and pull-request
+workflows. This includes the unchanged native packet fixtures and the new late
+deadline/native-context regressions. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41822417000
+
+The offline mod-update audit reproduced three staging defects: a manifest could
+change an artifact's extension, file/ancestor collisions passed dry-run, and a
+growing regular source could consume more than its declared extent before later
+rejection. Staging now requires matching artifact suffixes, rejects casefolded
+ancestor conflicts before destination creation, and bounds hashing/copying to the
+declared extent plus one non-written probe. Valid same-format renames remain
+supported. Sixteen additional tests cover these cases plus source immutability,
+interrupted copies, no-overwrite receipts, symlinks, ZIP CRC and cumulative bounds.
+Independent review and the local suite above pass; Windows-specific filesystem
+behavior still requires exact-head CI. No game/profile installation or access
+was used.
