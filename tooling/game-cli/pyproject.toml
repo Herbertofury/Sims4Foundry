@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sims4foundry-game-cli"
+version = "0.1.0"
+description = "Evidence-gated Sims 4 workflow CLI and offline mod update tools"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+foundry-game = "sims4foundry_cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
