@@ -31,14 +31,26 @@ def _stamp(info):
             "attributes": getattr(info, "st_file_attributes", 0)}
 
 
-def _same_open_source(path_stamp, descriptor_stamp):
+def _same_open_source(path_stamp, descriptor_stamp, path=None):
+    comparable_path = path_stamp
+    # CPython Windows path stat adds 0111 for .exe/.bat/.cmd/.com names;
+    # descriptor fstat has no filename and does not add those synthetic bits.
+    # Reconcile only that exact regular-file difference, not mode/type drift.
+    # Source: CPython v3.11.14 Modules/posixmodule.c:1924-1939 and
+    # v3.13.17 Modules/posixmodule.c:1845-1869; Python/fileutils.c fstat.
+    if (_WINDOWS and path is not None
+            and ntpath.splitext(str(path))[1].casefold() in (".exe", ".bat", ".cmd", ".com")
+            and stat.S_ISREG(path_stamp["mode"]) and stat.S_ISREG(descriptor_stamp["mode"])
+            and not descriptor_stamp["mode"] & 0o111
+            and path_stamp["mode"] == descriptor_stamp["mode"] | 0o111):
+        comparable_path = dict(path_stamp, mode=descriptor_stamp["mode"])
     # Windows stat/fstat can expose different ctime meanings. Compare explicit
     # birth time across APIs, but retain each full stamp for same-API checks.
     if (_WINDOWS and path_stamp["birthtime_ns"] is not None
             and descriptor_stamp["birthtime_ns"] is not None):
-        return ({k: v for k, v in path_stamp.items() if k != "ctime_ns"}
+        return ({k: v for k, v in comparable_path.items() if k != "ctime_ns"}
                 == {k: v for k, v in descriptor_stamp.items() if k != "ctime_ns"})
-    return path_stamp == descriptor_stamp
+    return comparable_path == descriptor_stamp
 
 
 def _source_stat(path, code, maximum=None):
@@ -69,7 +81,7 @@ def _snapshot(path, expected, code, *, collect=False, tail=False):
         try:
             with os.fdopen(descriptor, "rb", buffering=0, closefd=False) as stream:
                 descriptor_stamp = _stamp(os.fstat(stream.fileno()))
-                if not _same_open_source(expected, descriptor_stamp):
+                if not _same_open_source(expected, descriptor_stamp, path):
                     _changed(code)
                 start = max(0, expected["size"] - MAX_LOG_TAIL_BYTES) if tail else 0
                 # Look behind the tail so a complete first line is not dropped.

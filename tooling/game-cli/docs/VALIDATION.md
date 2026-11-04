@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 670 tests collected, 657 passed, 13 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 674 tests collected, 660 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -321,3 +321,19 @@ memory amplification while preserving latest-valid selection and rotation seams.
 Twenty new tiny-fixture tests plus the eight earlier launch cases pass, alongside
 independent review and the full local suite above. This remains read-only metadata
 preparation, not launch execution or authority. Exact-head Windows CI is pending.
+
+At launch-bound head ff5683ec37074e51bd45dda50c6ca45fed750e7a, both Linux jobs
+passed but both Windows jobs failed before reading the fabricated executable.
+CPython path-based stat adds filename-derived execute bits for `.exe`, `.bat`,
+`.cmd` and `.com`, unlike descriptor-based fstat. The cross-API comparison now
+reconciles only that exact Windows regular-file difference, with known suffix,
+no descriptor execute bits and otherwise identical mode. Full original same-API
+stamps, file type, identity, size, timestamps and attributes remain checked.
+Sources: [CPython 3.11.14](https://github.com/python/cpython/blob/v3.11.14/Modules/posixmodule.c#L1925-L1938)
+and [CPython 3.13.17](https://github.com/python/cpython/blob/v3.13.17/Modules/posixmodule.c#L1845-L1868).
+
+Three portable regressions cover this narrow reconciliation and retained drift
+checks. A fourth Windows-only test checks real stat/fstat for tiny fabricated
+executable-named files without executing them. Independent review, 31 passing
+local launch tests and the combined local suite above pass; the new native test
+skips on Linux. Exact-head Windows CI must confirm the correction.

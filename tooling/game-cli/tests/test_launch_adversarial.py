@@ -1,6 +1,7 @@
 """Tiny fabricated sources only: no EA/game access, launches or native senders."""
 import hashlib
 import os
+import stat
 from pathlib import Path
 import tempfile
 import unittest
@@ -231,6 +232,77 @@ class LaunchAdversarialTests(unittest.TestCase):
                     self.assertFalse(launch._same_open_source(expected, dict(descriptor, **{key: descriptor[key] + 1})), key)
             self.assertFalse(launch._same_open_source(dict(expected, birthtime_ns=None), dict(descriptor, birthtime_ns=None)))
         self.assertNotEqual(expected, descriptor)
+
+    def test_windows_filename_execute_bits_are_reconciled_only_across_apis(self):
+        descriptor = dict(launch._stamp(self.exe.stat()), mode=stat.S_IFREG | 0o666)
+        expected = dict(descriptor, mode=stat.S_IFREG | 0o777)
+        originals = (dict(expected), dict(descriptor))
+        with mock.patch.object(launch, "_WINDOWS", True):
+            for suffix in (".exe", ".EXE", ".bat", ".cmd", ".com"):
+                self.assertTrue(launch._same_open_source(expected, descriptor, "fixture" + suffix))
+            for suffix in (".xml", ".log", ".package", ".exe.bak"):
+                self.assertFalse(launch._same_open_source(expected, descriptor, "fixture" + suffix))
+            self.assertFalse(launch._same_open_source(expected, descriptor))
+        with mock.patch.object(launch, "_WINDOWS", False):
+            self.assertFalse(launch._same_open_source(expected, descriptor, self.exe))
+        self.assertEqual(originals, (expected, descriptor))
+
+    def test_windows_mode_reconciliation_keeps_type_permissions_and_identity(self):
+        descriptor = dict(launch._stamp(self.exe.stat()), mode=stat.S_IFREG | 0o666, birthtime_ns=123)
+        expected = dict(descriptor, mode=stat.S_IFREG | 0o777, ctime_ns=descriptor["ctime_ns"] + 1)
+        with mock.patch.object(launch, "_WINDOWS", True):
+            self.assertTrue(launch._same_open_source(expected, descriptor, self.exe))
+            for mode in (stat.S_IFDIR | 0o666, stat.S_IFREG | 0o444,
+                         stat.S_IFREG | 0o667, stat.S_IFREG | 0o766):
+                self.assertFalse(launch._same_open_source(expected, dict(descriptor, mode=mode), self.exe))
+            for mode in (stat.S_IFDIR | 0o777, stat.S_IFREG | 0o555,
+                         stat.S_IFREG | 0o766, stat.S_IFREG | 0o667):
+                self.assertFalse(launch._same_open_source(dict(expected, mode=mode), descriptor, self.exe))
+            for field in ("device", "inode", "size", "mtime_ns", "birthtime_ns", "attributes"):
+                self.assertFalse(launch._same_open_source(expected, dict(descriptor, **{field: descriptor[field] + 1}), self.exe), field)
+            self.assertFalse(launch._same_open_source(dict(expected, birthtime_ns=None),
+                                                     dict(descriptor, birthtime_ns=None), self.exe))
+
+    def test_windows_same_api_execute_bit_drift_is_still_rejected(self):
+        # Fabricate each API's stable Windows mode without changing the source.
+        original_fstat = os.fstat
+        original_source_stat = launch._source_stat
+        for change_path in (False, True):
+            with self.subTest(path_api=change_path):
+                observations = {"path": 0, "descriptor": 0}
+                def source_stat(path, *args, **kwargs):
+                    result = original_source_stat(path, *args, **kwargs)
+                    if path == self.exe:
+                        observations["path"] += 1
+                        mode = stat.S_IFREG | (0o766 if change_path and observations["path"] >= 3 else 0o777)
+                        result = dict(result, mode=mode)
+                    return result
+                def descriptor_stat(fd):
+                    actual = original_fstat(fd)
+                    observations["descriptor"] += 1
+                    mode = stat.S_IFREG | (0o667 if not change_path and observations["descriptor"] >= 2 else 0o666)
+                    values = {name: getattr(actual, name) for name in dir(actual) if name.startswith("st_")}
+                    values["st_mode"] = mode
+                    from types import SimpleNamespace
+                    return SimpleNamespace(**values)
+                with mock.patch.object(launch, "_WINDOWS", True), \
+                        mock.patch.object(launch, "_source_stat", side_effect=source_stat), \
+                        mock.patch.object(launch.os, "fstat", side_effect=descriptor_stat):
+                    self.assert_refused("installation_changed")
+
+    @unittest.skipUnless(os.name == "nt", "Windows stat/fstat filename-mode behavior")
+    def test_native_windows_fabricated_executable_stat_identity(self):
+        # Read only arbitrary fixture bytes. Never execute this .exe-named file.
+        for path in (self.exe, self.launcher, self.manifest, self.log):
+            with self.subTest(source=path.name):
+                before = launch._source_stat(path, "fixture_error")
+                with path.open("rb") as stream:
+                    descriptor = launch._stamp(os.fstat(stream.fileno()))
+                    self.assertTrue(launch._same_open_source(before, descriptor, path),
+                                    {"path": before, "descriptor": descriptor})
+                    self.assertEqual(before, launch._source_stat(path, "fixture_error"))
+                    self.assertEqual(descriptor, launch._stamp(os.fstat(stream.fileno())))
+        self.assertTrue(self.prepare()["ok"])
 
     def test_descriptor_is_closed_if_wrapper_construction_fails(self):
         opened = []
