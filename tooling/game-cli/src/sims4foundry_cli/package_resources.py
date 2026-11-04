@@ -42,6 +42,7 @@ MAX_PACKAGES = 128
 MAX_AUDIT_ENTRIES = 16384
 MAX_AUDIT_BYTES = 1024 * 1024 * 1024
 HASH_CHUNK_BYTES = 1024 * 1024
+_WINDOWS = os.name == "nt"
 COMPRESSION_METHODS = {
     0x0000: "uncompressed",
     0x5A42: "zlib",
@@ -58,7 +59,21 @@ def _stamp(info):
     # atime is intentionally absent: reading the source may update it.
     return {"device": info.st_dev, "inode": info.st_ino, "bytes": info.st_size,
             "mtime_ns": info.st_mtime_ns, "ctime_ns": info.st_ctime_ns,
+            "birthtime_ns": getattr(info, "st_birthtime_ns", None),
             "mode": info.st_mode, "file_attributes": getattr(info, "st_file_attributes", 0)}
+
+
+def _same_open_source(path_stamp, descriptor_stamp):
+    # CPython on Windows may expose creation time through stat().st_ctime_ns
+    # but change time through fstat().st_ctime_ns (cpython issue #157671).
+    # Compare the explicit birth time across APIs, retaining each API's FULL
+    # original stamp separately for subsequent drift checks. Do not discard
+    # ctime from same-API checks or relax identity/size/mtime/attribute matching.
+    if (_WINDOWS and path_stamp["birthtime_ns"] is not None
+            and descriptor_stamp["birthtime_ns"] is not None):
+        return ({k: v for k, v in path_stamp.items() if k != "ctime_ns"}
+                == {k: v for k, v in descriptor_stamp.items() if k != "ctime_ns"})
+    return path_stamp == descriptor_stamp
 
 
 def _source_path(path):
@@ -89,15 +104,16 @@ def _open_source(path, expected):
         # closefd=False prevents an uncertain constructor failure from closing
         # and potentially reusing the descriptor behind this finally block.
         with os.fdopen(descriptor, "rb", buffering=0, closefd=False) as stream:
-            if _stamp(os.fstat(stream.fileno())) != expected:
+            descriptor_stamp = _stamp(os.fstat(stream.fileno()))
+            if not _same_open_source(expected, descriptor_stamp):
                 _changed()
-            yield stream
+            yield stream, descriptor_stamp
     finally:
         os.close(descriptor)
 
 
-def _check_source(path, stream, expected):
-    if _stamp(os.fstat(stream.fileno())) != expected:
+def _check_source(path, stream, expected, descriptor_expected):
+    if _stamp(os.fstat(stream.fileno())) != descriptor_expected:
         _changed()
     try:
         current = _source_stat(path)
@@ -256,17 +272,17 @@ def inspect_resources(path):
     path = _source_path(path)
     before_stat = _source_stat(path)
     size = before_stat["bytes"]
-    with _open_source(path, before_stat) as stream:
+    with _open_source(path, before_stat) as (stream, descriptor_stat):
         header = _read_exact(stream, 0, HEADER_BYTES)
         metadata = _header(header, size)
         before_hash = _hash_source(stream, size)
-        _check_source(path, stream, before_stat)
+        _check_source(path, stream, before_stat, descriptor_stat)
         if _read_exact(stream, 0, HEADER_BYTES) != header:
             _changed()
         raw_index = _read_exact(stream, metadata["offset"], metadata["bytes"]) if metadata["bytes"] else b""
         resources = _parse_index(raw_index, metadata, size)
         after_hash = _hash_source(stream, size)
-        _check_source(path, stream, before_stat)
+        _check_source(path, stream, before_stat, descriptor_stat)
         if after_hash != before_hash:
             _changed()
     return _bounded_result({"ok": True, "schema": 1, "kind": "foundry_package_resources",
@@ -285,9 +301,9 @@ def _verify_snapshot(report):
     expected = report["source_stat"]
     if _source_stat(path) != expected:
         _changed()
-    with _open_source(path, expected) as stream:
+    with _open_source(path, expected) as (stream, descriptor_stat):
         actual = _hash_source(stream, report["bytes"])
-        _check_source(path, stream, expected)
+        _check_source(path, stream, expected, descriptor_stat)
         if actual != report["sha256"]:
             _changed()
 

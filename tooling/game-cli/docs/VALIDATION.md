@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- `python -m unittest discover -s tests -v`: 365 tests collected: 357 passed, 8 CI-only Windows fixture tests skipped.
+- `python -m unittest discover -s tests -v`: 368 tests collected: 360 passed, 8 CI-only Windows fixture tests skipped.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -83,13 +83,22 @@ d2500f4762755381cf0865257d2a5567e479f4fd, all four Windows/Linux Python 3.11/3.1
 jobs passed, including that native enumeration test. Run:
 https://github.com/Herbertofury/Sims4Foundry/actions/runs/41806148587
 
-The next local batch adds 36 synthetic DBPF resource/audit tests, 21 operation
+The resource batch adds 39 synthetic DBPF resource/audit tests, 21 operation
 source-map tests and two CLI routing tests. DBPF coverage includes all shared
 index-field combinations, conditional compression records, invalid extents,
 duplicate owners, aggregate bounds, source replacement/stat/hash drift, and
 descriptor cleanup if file-wrapper construction fails. All fixture bodies are
 arbitrary fabricated bytes, not game assets. The source map exposes no dispatcher
-or dynamic imports and never claims live qualification. This batch still requires
-CI for its exact published source head. On platforms that deny replacement of an
+or dynamic imports and never claims live qualification. On platforms that deny replacement of an
 open file, the replacement-race fixture is skipped; refusal is not simulated as a
 successful replacement.
+
+At remote head e519c77f4ca1da2d89a7a345264a3a420ea6c4e4, both Linux jobs and
+Windows/Python 3.11 passed. Windows/Python 3.13 correctly refused packages because
+the initial cross-API stat comparison was too strict. CPython's documented
+[Windows stat/fstat ctime discrepancy](https://github.com/python/cpython/issues/157671)
+and the 3.13.17 implementation show that path ctime may mean birth time while
+descriptor ctime means metadata change time. The correction compares explicit
+birth time across the APIs and retains both full original stamps for subsequent
+same-API drift checks; identity, attributes, size, mtime and both hashes remain
+checked. Three new regressions pass locally. CI for the corrected head is pending.

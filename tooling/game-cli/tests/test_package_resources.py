@@ -84,6 +84,35 @@ class PackageResourceTests(unittest.TestCase):
         target.write_bytes(raw)
         return target
 
+    def test_windows_cross_api_ctime_uses_explicit_birth_time(self):
+        path_stamp = resources._source_stat(self.path)
+        path_stamp["birthtime_ns"] = 123
+        descriptor_stamp = dict(path_stamp, ctime_ns=456)
+        with mock.patch.object(resources, "_WINDOWS", True):
+            self.assertTrue(resources._same_open_source(path_stamp, descriptor_stamp))
+            for key in path_stamp:
+                if key == "ctime_ns":
+                    continue
+                changed = dict(descriptor_stamp, **{key: descriptor_stamp[key] + 1})
+                self.assertFalse(resources._same_open_source(path_stamp, changed), key)
+        with mock.patch.object(resources, "_WINDOWS", False):
+            self.assertFalse(resources._same_open_source(path_stamp, descriptor_stamp))
+
+    def test_missing_birth_time_never_relaxes_ctime_comparison(self):
+        path_stamp = resources._source_stat(self.path)
+        path_stamp["birthtime_ns"] = None
+        descriptor_stamp = dict(path_stamp, ctime_ns=path_stamp["ctime_ns"] + 1)
+        with mock.patch.object(resources, "_WINDOWS", True):
+            self.assertFalse(resources._same_open_source(path_stamp, descriptor_stamp))
+
+    def test_descriptor_ctime_drift_is_still_rejected(self):
+        expected = resources._source_stat(self.path)
+        changed = dict(expected, ctime_ns=expected["ctime_ns"] + 1)
+        with self.path.open("rb") as stream, mock.patch.object(resources, "_stamp", return_value=changed):
+            with self.assertRaises(FoundryError) as caught:
+                resources._check_source(self.path, stream, expected, expected)
+        self.assertEqual("package_changed", caught.exception.code)
+
     def test_stream_wrapper_failure_closes_owned_descriptor(self):
         opened = []
         real_open = os.open
