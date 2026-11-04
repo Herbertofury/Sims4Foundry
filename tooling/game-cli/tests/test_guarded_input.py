@@ -50,6 +50,59 @@ class GuardedInputTests(unittest.TestCase):
         self.assertFalse(result["game_qualified"])
         self.assertEqual([Message.LEFT_DOWN, Message.LEFT_UP], [p.message for _,p in self.backend.posts])
 
+    def test_caller_and_audit_target_mutations_cannot_change_owned_binding(self):
+        for target_kind in ("caller", "audit"):
+            for stage in ("before_dispatch", "after_down"):
+                with self.subTest(target=target_kind, stage=stage):
+                    backend, expected, audit = FakeBackend(), identity(), []
+                    def mutate():
+                        target = expected if target_kind == "caller" else audit[0]["target"]
+                        target["hwnd"] = 999
+                        target["pid"] = 999
+                        target["client_origin"][0] = 999
+                    def journal(record):
+                        audit.append(record)
+                        if record["state"] == "dispatch_intent" and stage == "before_dispatch":
+                            mutate()
+                    def posted(packet):
+                        if packet.message is Message.LEFT_DOWN and stage == "after_down":
+                            mutate()
+                        return True
+                    backend.failure = posted
+                    result = run_packets(expected, self.click, backend, journal)
+                    self.assertTrue(result["queue_accepted"])
+                    self.assertEqual([(100, Message.LEFT_DOWN), (100, Message.LEFT_UP)],
+                                     [(hwnd, packet.message) for hwnd, packet in backend.posts])
+                    self.assertIsNone(result["release_error"])
+
+    def test_release_refuses_changed_or_unknown_integrity_without_retry(self):
+        for levels in ((8192, 12288), (12288, 12288), (0, 0), (None, 8192), (True, True)):
+            with self.subTest(levels=levels):
+                backend = FakeBackend()
+                def posted(packet):
+                    if packet.message is Message.LEFT_DOWN:
+                        backend.levels = levels
+                    return True
+                backend.failure = posted
+                result = run_packets(identity(), self.click, backend, lambda _: None)
+                self.assertEqual("unresolved", result["outcome"])
+                self.assertIsNotNone(result["release_error"])
+                self.assertEqual([Message.LEFT_DOWN], [packet.message for _, packet in backend.posts])
+
+    def test_release_integrity_query_exception_does_not_replay(self):
+        backend = FakeBackend()
+        def failed_query():
+            raise OSError("fabricated integrity query failure")
+        def posted(packet):
+            if packet.message is Message.LEFT_DOWN:
+                backend.integrities = failed_query
+            return True
+        backend.failure = posted
+        result = run_packets(identity(), self.click, backend, lambda _: None)
+        self.assertEqual("unresolved", result["outcome"])
+        self.assertIsNotNone(result["release_error"])
+        self.assertEqual([Message.LEFT_DOWN], [packet.message for _, packet in backend.posts])
+
     def test_integrity_refusal_sends_nothing(self):
         self.backend.levels = (8192, 12288)
         with self.assertRaises(FoundryError): self.run_sequence()

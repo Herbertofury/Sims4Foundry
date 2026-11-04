@@ -10,6 +10,7 @@ This module does not grant profile ownership, game qualification or permission.
 Returned queue acceptance is never semantic success. It cannot guarantee release
 if the original window/process becomes unobservable, and never targets a replacement.
 """
+from copy import deepcopy
 from dataclasses import replace
 from .errors import FoundryError
 from .input_packets import InputPacket, Message, CoordinateSpace, MAX_DRAG_POINTS, MAX_DRAG_PATH_PIXELS
@@ -71,9 +72,15 @@ def run_packets(expected, packets, backend, journal):
     Journal must durably persist records or raise. All packet intent is persisted
     before dispatch; optional per-packet evidence is buffered while input is held.
     Up precedes its flush, even if recorder/viewport/foreground checks fail.
+    Release still requires original ownership and equal known integrity; losing
+    either leaves release unresolved, never authorizes a weaker fallback.
+    Target copies prevent accidental aliasing, not arbitrary trusted-Python access.
     Every backend call must be bounded; this pure runner cannot supervise a
     stalled native backend or guarantee cleanup after process termination.
     """
+    # Detach nested geometry as well as scalar ownership fields. Audit callbacks
+    # must never receive the internal binding used for dispatch or release.
+    expected = deepcopy(expected)
     validate_identity(expected)
     release = _validate_sequence(packets, expected)
     baseline = backend.foreground()
@@ -87,12 +94,15 @@ def run_packets(expected, packets, backend, journal):
     error = None
     release_error = None
 
-    def current():
-        same_identity(expected, backend.observe())
+    def equal_integrity():
         levels = backend.integrities()
         if (type(levels) is not tuple or len(levels) != 2 or any(type(v) is not int or v <= 0 for v in levels)
                 or levels[0] != levels[1] or levels[1] != expected["integrity"]):
             raise FoundryError("integrity_mismatch", "Equal known sender/target integrity is required; no bypass exists.")
+
+    def current():
+        same_identity(expected, backend.observe())
+        equal_integrity()
         if backend.verify_recording() is not True:
             raise FoundryError("recording_unverified", "Actively progressing recording must be explicitly verified.")
         if backend.foreground() != baseline:
@@ -108,6 +118,7 @@ def run_packets(expected, packets, backend, journal):
             observed = backend.observe_owned()
             if not isinstance(observed, dict) or any(observed.get(key) != expected[key] for key in OWNERSHIP):
                 raise FoundryError("ownership_changed", "Original ownership is unverified; never release to a replacement.")
+            equal_integrity()
             packet = release if release.coordinate_space is CoordinateSpace.NONE else replace(release, lparam=last_point)
             # No recorder, viewport, sleep, timing or optional disk operations here.
             accepted = backend.post(expected["hwnd"], packet)
@@ -122,7 +133,7 @@ def run_packets(expected, packets, backend, journal):
     for packet in packets:
         if not packet.release_intent and backend.verify_input_context(packet) is not True:
             raise FoundryError("input_context_unverified", "Key/layout and actual modifier state must be explicitly verified.")
-    journal({"state": "dispatch_intent", "packet_count": len(packets), "target": expected,
+    journal({"state": "dispatch_intent", "packet_count": len(packets), "target": deepcopy(expected),
              "packets": [{"message": int(p.message), "wparam": p.wparam, "lparam": p.lparam,
                           "offset_ms": p.offset_ms, "release": p.release_intent} for p in packets],
              "semantic_success": False, "qualification_granted": False})

@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 542 tests collected, 533 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 545 tests collected, 536 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -181,3 +181,21 @@ files, exact selection, missing/corrupt/busy history and the absence of mutation
 or network routes. Both additions passed independent source review and the full
 local suite above; their new exact-head Windows/Linux CI remains to be run.
 See [COMPANION_RECOVERY.md](COMPANION_RECOVERY.md) for the test-only boundaries.
+
+At recovery branch head 1feccc8a910f8eefa86ab96a3e460117454adf20, all four
+Windows/Linux Python 3.11/3.13 jobs passed, including real authenticated
+loopback recovery and passive journal CLI tests. An isolated, no-site-packages
+import of the exact-source wheel also passed the 14-step synthetic workflow
+and read-only journal status. No game bootstrap or live provider was installed.
+Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41816735723
+
+Native-input integration review found an accidental alias in the injected runner:
+the caller and audit callback could retain and change the same target dictionary,
+preventing release to the still-original window. The runner now detaches its
+internal target and its audit copy, including nested geometry. Three regressions
+cover caller/audit mutations before or after Down and changed/unknown/failing
+integrity checks on release. Original Up still ignores recorder/geometry failure,
+but never bypasses missing ownership or equal known integrity. All 23 focused
+runner tests and the full local suite above pass; this is synthetic evidence,
+not a native sender or game validation.
