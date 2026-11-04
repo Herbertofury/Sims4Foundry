@@ -1,4 +1,7 @@
-"""Offline wire contract for a *future*, unqualified Foundry companion.
+"""Offline schema-1 wire contract for an unqualified Foundry companion.
+
+The separate companion_transport module wraps this unchanged schema in an
+explicit schema-2 TTL/context envelope; v1 alone is not queue admission.
 
 There is no transport, listener, authentication, permission check, game API,
 dispatch queue, credential generation, or persistent journal in this module.

@@ -9,10 +9,16 @@ Sims profile, connected to a running game, or used to alter a save.
 
 - `src/sims4foundry_cli/companion_protocol.py`: offline 64-KiB length-prefixed strict
   JSON framing, four typed operations, exact request/session/process lifetime
-  binding, correlated responses and conservative replay classification. No socket,
-  credentials, authorization, dispatch or persistent storage.
+  binding, correlated responses and conservative replay classification. This v1
+  contract is unchanged; it cannot carry the queue's TTL/save context by itself.
+- `src/sims4foundry_cli/companion_transport.py` and companion `wire.py`/`transport.py`:
+  an explicit schema-2 context envelope, receipt-only reconnects and a real bounded
+  loopback socket bridge. Server and client default deny without independently
+  established host/peer authorization hooks; no such production provider ships.
+  See [TRANSPORT.md](TRANSPORT.md) for exact framing and security boundaries.
 - `companion-src/foundry_companion/queue.py`: Python-3.7-compatible immutable
-  requests, exact zone/household preconditions, bounded TTL, 48 pending requests
+  requests, process epoch and exact zone/household/save preconditions, bounded TTL,
+  pre-start owner admission and an irreversible uncertainty latch, 48 pending requests
   and 128 retained IDs. Only the captured Thread object plus ident drains; at
   most one native call per tick. Empty ticks do no I/O. No admitted ID is evicted,
   no reset exists, and started/unknown requests never requeue. Exhaustion refuses
@@ -55,11 +61,12 @@ requests its menu and still needs independently observed choices/process closure
 
 1. An admitted disposable profile, exact process lifetime, shared durable journal,
    authenticated bounded transport and version-scoped provider qualification.
-   The framed client carries process epoch; the owner queue carries zone/household
-   preconditions. A host must preserve and validate both, plus save context. These
-   are not currently connected and caller JSON does not establish authorization.
+   The new schema-2 transport preserves epoch, TTL and zone/household/save context
+   into the queue. Independent peer security, durable journaling and live host
+   authorization remain absent; caller JSON cannot establish authorization.
 2. Owner-thread bootstrap and zone lifecycle hooks that coexist with other mods;
-   no game API may run on a network worker. No listener or startup hook ships here.
+   no game API may run on a network worker. The source-only listener has an explicit
+   caller-controlled lifecycle and no automatic startup hook or scheduling.
 3. CAS UI ownership and readback independent of gameplay Python availability,
    with original native semantics and preservation. Build and menu providers are
    likewise missing. No generic cheat/raw-input fallback is exposed.
@@ -73,13 +80,15 @@ requests its menu and still needs independently observed choices/process closure
 ## Python compatibility evidence
 
 The existing build expects Python 3.7 bytecode magic `420d0d0a`, checked-hash
-invalidation and optimization zero. The three new companion files were parsed
-and tested with an isolated source-built official Python 3.7.17. All 63 current
-queue/native tests passed on that interpreter. The game itself was not present.
-No `.ts4script` was built; there is no bootstrap to install.
+invalidation and optimization zero. Companion sources, including wire/transport,
+were parsed and tested with an isolated source-built official Python 3.7.17.
+Queue/native/socket regressions and an actual current-Python client to a separate
+3.7 socket-server fixture passed. The game itself was not present. No `.ts4script`
+was built; there is no bootstrap to install. Reproducible test commands and scope
+are in [TRANSPORT.md](TRANSPORT.md).
 
 Python 3.7 is end-of-life. This isolated interpreter is used only for trusted local
-compatibility tests, never a network service or the current CLI interpreter.
+compatibility/socket fixtures, never a production network service or the current CLI interpreter.
 See the [official Python 3.7.17 release](https://www.python.org/downloads/release/python-3717/).
 The actual game build, embedded Python behavior and UI resources still need
 current-installation qualification, rather than relying on historical 1.128.90

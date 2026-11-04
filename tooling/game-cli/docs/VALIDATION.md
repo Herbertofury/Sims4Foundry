@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- `python -m unittest discover -s tests -v`: 368 tests collected: 360 passed, 8 CI-only Windows fixture tests skipped.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 421 tests collected, 412 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, one additional cross-runtime test skips.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -101,4 +101,17 @@ and the 3.13.17 implementation show that path ctime may mean birth time while
 descriptor ctime means metadata change time. The correction compares explicit
 birth time across the APIs and retains both full original stamps for subsequent
 same-API drift checks; identity, attributes, size, mtime and both hashes remain
-checked. Three new regressions pass locally. CI for the corrected head is pending.
+checked. Three new regressions pass locally. At corrected remote head
+3bcc9ef01ca359c0136beec02774618fc48abd6e, all four Windows/Linux Python 3.11/3.13
+jobs passed, including native process/window/mutex fixtures. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41808723915
+
+The next source-only transport batch adds real isolated socket tests, including
+a current client talking to a separate Python-3.7 server fixture. On actual
+Python 3.7.17 using `-B -S -s`, the queue/native/transport suite runs 116 tests:
+111 passed and five current-client/platform tests skipped. Owner admission now
+precedes started; every later exception remains unknown. Reviews prompted fixes
+for listener loss, thread/socket startup and cleanup uncertainty, and exclusive
+Windows listener binding. The new native Windows collision test still needs CI.
+No authentication provider, live host admission, durable journal integration or
+game bootstrap was installed or qualified. See [TRANSPORT.md](TRANSPORT.md).

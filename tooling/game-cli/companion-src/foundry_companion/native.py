@@ -120,6 +120,10 @@ class NativeAPI(object):
         observation, client = self._admitted_read(request)
         if (observation['errors'] or observation['zone_id'] != request.expected_zone_id
                 or observation['household_id'] != request.expected_household_id
+                or (request.expected_save_slot is not None
+                    and observation['save_slot'] != request.expected_save_slot)
+                or (request.expected_save_guid is not None
+                    and observation['save_guid'] != request.expected_save_guid)
                 or observation['zone_running'] is not True or observation['in_build_buy'] is not False):
             raise NativeRefusal('Exact running Live zone/household context changed or is unobservable.')
         if self._admission.require_mutation(request, observation) is not True:

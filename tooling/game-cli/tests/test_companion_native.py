@@ -1,5 +1,6 @@
 """Native call-shape tests with fabricated services, never a running game."""
 import ast
+from dataclasses import replace
 from contextlib import contextmanager
 from pathlib import Path
 import sys
@@ -74,6 +75,16 @@ class NativeBindingTests(unittest.TestCase):
             with self.assertRaises(NativeRefusal): api.execute(request(operation))
         self.assertEqual([],self.loads)
         self.assertEqual([],self.commands)
+
+    def test_explicit_save_context_is_rechecked_before_command_imports(self):
+        for changes in (dict(expected_save_slot=5, expected_save_guid="99"),
+                        dict(expected_save_slot=4, expected_save_guid="100")):
+            with self.assertRaises(NativeRefusal):
+                self.api.execute(replace(request('live.set_speed'), **changes))
+        self.assertEqual([], self.loads)
+        self.assertEqual([], self.commands)
+        result = self.api.execute(replace(request('live.set_speed'), expected_save_slot=4, expected_save_guid="99"))
+        self.assertEqual('verified', result['outcome'])
 
     def test_observation_keeps_distinct_clocks_and_exact_ids(self):
         result=self.api.execute(request())

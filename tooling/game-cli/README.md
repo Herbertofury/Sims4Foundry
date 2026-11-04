@@ -172,12 +172,17 @@ See [Architecture](docs/ARCHITECTURE.md), [Validation](docs/VALIDATION.md) and
 ## Uninstalled companion components
 
 The `companion-src/foundry_companion` sources are a Python-3.7-compatible bounded
-owner-thread queue and narrow native call bindings. They start no server, install
-no hooks, and default to denied admission. Tests use fabricated game services.
+owner-thread queue, narrow native call bindings, and an explicit-lifecycle bounded
+loopback transport. Imports and construction start no server or hooks. Server and
+client default deny without independent host/peer authorization providers, which
+are not implemented. Tests use only fabricated services and isolated sockets.
 They are not an installable mod or a working CAS/Build controller. See
 [COMPANION.md](docs/COMPANION.md) for implemented boundaries and missing integration.
-The client also has an offline framed protocol and a cooperative Windows process
-lease. Neither bypasses the live qualification gate or resolves earlier actions.
+The unchanged v1 client protocol is wrapped by a separate schema-2 transport
+contract carrying exact TTL/process/save context. Receipt-only reconnects never
+requeue an operation. A returned adapter assertion is not independent game evidence.
+See [TRANSPORT.md](docs/TRANSPORT.md). Neither this transport nor the cooperative
+Windows process lease bypasses live qualification or resolves earlier actions.
 
 ## Passive process discovery
 

@@ -331,7 +331,7 @@ class QueueLifecycleTests(QueueAssertions):
             self.assertEqual(0, local.queue_status().retained)
 
     def test_clock_interrupt_before_start_leaves_request_pending_without_execution(self):
-        local = queue.CompanionQueue(SESSION, clock=Mock(side_effect=[100, KeyboardInterrupt(), 101]))
+        local = queue.CompanionQueue(SESSION, clock=Mock(side_effect=[100, KeyboardInterrupt(), 101, 101]))
         local.submit(request())
         callback = Mock(side_effect=verified)
         with self.assertRaises(KeyboardInterrupt):
@@ -436,6 +436,109 @@ class ExecutionContractTests(QueueAssertions):
         self.assertEqual("pending", local.status(request(2).request_id).state)
 
 
+class OwnerPreflightTests(QueueAssertions):
+    def setUp(self):
+        self.clock = Clock()
+        self.queue = queue.CompanionQueue(SESSION, clock=self.clock)
+        self.queue.submit(request())
+
+    def test_preflight_runs_unlocked_before_started_and_false_is_known_refusal(self):
+        def admission(req):
+            self.assertTrue(self.queue._lock.acquire(False))
+            self.queue._lock.release()
+            self.assertEqual("pending", self.queue.status(req.request_id).state)
+            return False
+        native = Mock()
+        final = self.queue.drain(native, admit=admission)
+        self.assertEqual(("refused", "host_dispatch_denied", None),
+                         (final.state, final.reason, final.started_at))
+        native.assert_not_called()
+        self.assertIsNone(self.queue.drain(native))
+
+    def test_preflight_renewal_context_change_and_nontrue_never_dispatch(self):
+        for action, reason in [(lambda: setattr(self.clock, "now", 110), "expired"),
+                               (lambda: self.queue.block_mutations("context_changed"), "context_changed"),
+                               (lambda: self.queue.close(), "host_shutdown")]:
+            self.setUp()
+            def admission(req):
+                action()
+                return True
+            native = Mock()
+            final = self.queue.drain(native, admit=admission)
+            self.assertEqual(("refused", reason, None), (final.state, final.reason, final.started_at))
+            native.assert_not_called()
+        self.setUp()
+        self.assertEqual("refused", self.queue.drain(Mock(), admit=lambda _: 1).state)
+
+    def test_preflight_queue_lock_contention_refuses_without_requeue_or_owner_wait(self):
+        release, held = threading.Event(), threading.Event()
+        def lock_reader():
+            with self.queue._lock:
+                held.set()
+                release.wait(3)
+        worker = threading.Thread(target=lock_reader)
+        def admit(_):
+            worker.start()
+            self.assertTrue(held.wait(1))
+            return True
+        native = Mock()
+        try:
+            final = self.queue.drain(native, admit=admit)
+            self.assertEqual(("refused", "queue_busy_before_start"), (final.state, final.reason))
+            self.assertTrue(worker.is_alive())
+        finally:
+            release.set(); worker.join(1)
+        self.assertIs(final, self.queue.status(request().request_id))
+        self.assertIsNone(self.queue.drain(native))
+        native.assert_not_called()
+
+    def test_preflight_exception_and_interrupt_record_only_prestart_refusal(self):
+        for error in (RuntimeError("fixture"), KeyboardInterrupt()):
+            self.setUp()
+            native = Mock()
+            if isinstance(error, Exception):
+                final = self.queue.drain(native, admit=Mock(side_effect=error))
+            else:
+                with self.assertRaises(KeyboardInterrupt):
+                    self.queue.drain(native, admit=Mock(side_effect=error))
+                final = self.queue.status(request().request_id)
+            self.assertEqual(("refused", None), (final.state, final.started_at))
+            native.assert_not_called()
+            self.assertIsNone(self.queue.drain(native))
+
+    def test_second_clock_interrupt_before_start_has_no_requeue(self):
+        self.queue._clock = Mock(side_effect=[101, KeyboardInterrupt()])
+        native = Mock()
+        with self.assertRaises(KeyboardInterrupt):
+            self.queue.drain(native, admit=lambda _: True)
+        final = self.queue.status(request().request_id)
+        self.assertEqual(("refused", "invalid_clock", None), (final.state, final.reason, final.started_at))
+        self.assertIsNone(self.queue.drain(native))
+        native.assert_not_called()
+
+    def test_process_and_save_context_participate_in_exact_payload_deduplication(self):
+        local = queue.CompanionQueue(SESSION)
+        base = request(process_epoch=queue.ProcessEpoch(100, 200), expected_save_slot=4, expected_save_guid="99")
+        local.submit(base)
+        for changes in (dict(process_epoch=queue.ProcessEpoch(100, 201)),
+                        dict(expected_save_slot=5), dict(expected_save_guid="100")):
+            self.assert_code("request_conflict", local.submit, replace(base, **changes))
+        self.assertEqual("request_conflict", local.drain(Mock()).reason)
+
+    def test_unknown_and_unverified_latch_blocks_new_and_already_pending_mutations(self):
+        for callback in (Mock(side_effect=RuntimeError()), lambda _: {"outcome": "unverified"}):
+            self.setUp()
+            self.queue.submit(request(2))
+            self.queue.drain(callback)
+            self.assertEqual("unresolved_mutation", self.queue.submit(request(3)).reason)
+            native = Mock()
+            self.assertEqual("unresolved_mutation", self.queue.drain(native).reason)
+            native.assert_not_called()
+            self.assertEqual("pending", self.queue.submit(request(4, operation="observe")).state)
+            self.queue.drain(verified)
+            self.assertEqual("unresolved_mutation", self.queue.submit(request(5)).reason)
+
+
 class ThreadingTests(QueueAssertions):
     def test_worker_submit_is_allowed_but_worker_drain_never_calls_native(self):
         local = queue.CompanionQueue(SESSION)
@@ -488,7 +591,7 @@ class ThreadingTests(QueueAssertions):
         self.assertIsNone(local.drain(execute))
         execute.assert_called_once()
 
-    def test_conflicting_concurrent_payloads_have_one_winner(self):
+    def test_conflicting_concurrent_payloads_retain_one_intent_but_block_dispatch(self):
         local = queue.CompanionQueue(SESSION)
         gate = threading.Barrier(3)
         accepted, rejected = [], []
@@ -509,7 +612,9 @@ class ThreadingTests(QueueAssertions):
         self.assertEqual(["request_conflict"], rejected)
         seen = []
         local.drain(lambda req: seen.append(req.arguments.speed) or verified(req))
-        self.assertEqual([accepted[0][0]], seen)
+        self.assertEqual([], seen)
+        self.assertEqual("request_conflict", local.status(request().request_id).reason)
+        self.assertEqual("request_conflict", local.queue_status().mutation_blocked_reason)
 
     def test_concurrent_unique_submissions_cannot_overflow_bounds(self):
         local = queue.CompanionQueue(SESSION, pending_capacity=4, history_capacity=8)

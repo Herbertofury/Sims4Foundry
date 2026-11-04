@@ -1,7 +1,8 @@
 """Volatile, uninstalled owner-thread queue, written for Python 3.7 syntax.
 
 This module opens no listeners, imports no native/game API, and performs no I/O.
-Only the caller-supplied ``execute(request)`` in ``drain`` may touch a native API.
+Only owner-thread ``admit(request)``/``execute(request)`` hooks in ``drain`` may
+check native state/dispatch. Neither may do network I/O or wait for a worker.
 Constructing this queue does not authorize that callback or qualify a game build.
 The host still needs authentication and permissions, a profile lease, current-build
 qualification, and an external durable intent/result journal before dispatch.
@@ -47,6 +48,18 @@ class QueueError(ValueError):
     def __init__(self, code, message):
         self.code = code
         super().__init__(message)
+
+
+@dataclass(frozen=True)
+class ProcessEpoch:
+    pid: int
+    creation_filetime: int
+
+    def __post_init__(self):
+        _check(type(self.pid) is int and 1 <= self.pid <= 2**32 - 1
+               and type(self.creation_filetime) is int
+               and 1 <= self.creation_filetime <= MAX_UINT64,
+               "invalid_epoch", "Expected exact PID and creation FILETIME.")
 
 
 class QueueBusy(QueueError):
@@ -117,6 +130,9 @@ class Request:
     ttl_seconds: float = 5.0
     expected_zone_id: Optional[str] = None
     expected_household_id: Optional[str] = None
+    process_epoch: Optional[ProcessEpoch] = None
+    expected_save_slot: Optional[int] = None
+    expected_save_guid: Optional[str] = None
 
     def __post_init__(self):
         self.validate()
@@ -135,8 +151,19 @@ class Request:
         _check(type(self.ttl_seconds) in (int, float)
                and 0 < self.ttl_seconds <= MAX_TTL_SECONDS,
                "invalid_ttl", "TTL must be finite and greater than zero, at most 30 seconds.")
+        if self.process_epoch is not None:
+            _check(type(self.process_epoch) is ProcessEpoch, "invalid_epoch",
+                   "Expected an immutable exact process epoch.")
+            self.process_epoch.__post_init__()
+        if self.expected_save_slot is not None or self.expected_save_guid is not None:
+            _check(type(self.expected_save_slot) is int
+                   and 0 <= self.expected_save_slot <= MAX_UINT64
+                   and type(self.expected_save_guid) is str
+                   and (self.expected_save_guid == "0" or _decimal_id(self.expected_save_guid)),
+                   "invalid_context", "Expected exact save slot and canonical uint64 GUID text.")
         if self.operation == "observe":
-            _check(self.expected_zone_id is None and self.expected_household_id is None,
+            _check(self.expected_zone_id is None and self.expected_household_id is None
+                   and self.expected_save_slot is None and self.expected_save_guid is None,
                    "invalid_context", "Observation does not carry mutation preconditions.")
         else:
             _check(_decimal_id(self.expected_zone_id)
@@ -172,6 +199,8 @@ class QueueStatus:
     pending_capacity: int
     history_capacity: int
     history_exhausted: bool
+    mutation_blocked_reason: Optional[str] = None
+    closed_reason: Optional[str] = None
 
 
 @dataclass
@@ -258,6 +287,8 @@ class CompanionQueue:
         # Each admitted entry can yield at most one completion, so it is bounded.
         self._completed = deque()
         self._draining = False
+        self._mutation_blocked_reason = None
+        self._closed_reason = None
 
     @property
     def session_id(self):
@@ -278,7 +309,10 @@ class CompanionQueue:
     def _apply_completed(self):
         while self._completed:
             request_id, snapshot = self._completed.popleft()
-            self._entries[request_id].snapshot = snapshot
+            entry = self._entries[request_id]
+            entry.snapshot = snapshot
+            if entry.request.operation != "observe" and snapshot.state in ("unknown", "unverified"):
+                self._mutation_blocked_reason = self._mutation_blocked_reason or "unresolved_mutation"
 
     def _now(self):
         value = self._clock()
@@ -306,8 +340,9 @@ class CompanionQueue:
             self._apply_completed()
             existing = self._entries.get(request.request_id)
             if existing is not None:
-                _check(existing.request == request, "request_conflict",
-                       "This request ID already has a different immutable payload.")
+                if existing.request != request:
+                    self._mutation_blocked_reason = self._mutation_blocked_reason or "request_conflict"
+                    raise QueueError("request_conflict", "This ID has a different immutable payload.")
                 return existing.snapshot
             if len(self._entries) == self._history_capacity:
                 return Snapshot(request.request_id, self._session_id, "refused", "history_full")
@@ -315,13 +350,16 @@ class CompanionQueue:
             deadline = now + request.ttl_seconds
             _check(math.isfinite(deadline) and deadline > now, "invalid_clock",
                    "Clock precision cannot represent this request's TTL.")
-            full = len(self._pending) == self._pending_capacity
+            reason = self._closed_reason
+            if reason is None and request.operation != "observe":
+                reason = self._mutation_blocked_reason
+            if reason is None and len(self._pending) == self._pending_capacity:
+                reason = "pending_full"
             snapshot = Snapshot(request.request_id, self._session_id,
-                                "refused" if full else "pending",
-                                "pending_full" if full else None,
+                                "refused" if reason else "pending", reason,
                                 admitted_at=now, expires_at=deadline)
             self._entries[request.request_id] = _Entry(request, snapshot)
-            if not full:
+            if reason is None:
                 self._pending.append(request.request_id)
             return snapshot
         finally:
@@ -345,22 +383,66 @@ class CompanionQueue:
             self._apply_completed()
             return QueueStatus(self._session_id, len(self._pending), len(self._entries),
                                self._pending_capacity, self._history_capacity,
-                               len(self._entries) == self._history_capacity)
+                               len(self._entries) == self._history_capacity,
+                               self._mutation_blocked_reason, self._closed_reason)
         finally:
             self._lock.release()
 
-    def drain(self, execute):
-        """Consume at most one pending entry, invoking execute at most once.
+    def block_mutations(self, reason="unresolved_mutation"):
+        """Permanently close mutation admission and dispatch, keeping receipts.
 
-        Empty ticks do not even consult the clock. An expired entry is refused
-        without execute. A callback exception/invalid result becomes unknown and
-        is never retried. SystemExit/KeyboardInterrupt are recorded unknown before
-        being re-raised. A verified result is only the adapter's assertion, not
-        independent evidence that its game build or API has been qualified.
+        The owner remains nonblocking. This does not abort an already-started
+        callback, erase history, or create a reconciliation/reset route.
+        """
+        _check(type(reason) is str and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", reason),
+               "invalid_reason", "Expected a bounded refusal reason code.")
+        self._acquire()
+        try:
+            self._mutation_blocked_reason = self._mutation_blocked_reason or reason
+        finally:
+            self._lock.release()
+
+    def close(self, reason="host_shutdown"):
+        """Permanently refuse future dispatch; never wait, even on a control worker."""
+        _check(type(reason) is str and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", reason),
+               "invalid_reason", "Expected a bounded refusal reason code.")
+        if not self._lock.acquire(blocking=False):
+            raise QueueBusy()
+        try:
+            self._closed_reason = self._closed_reason or reason
+        finally:
+            self._lock.release()
+
+    def _finish(self, request_id, old, state, reason=None, result=None, started_at=None):
+        final = Snapshot(request_id, self._session_id, state, reason, result,
+                         old.admitted_at, old.expires_at, started_at)
+        self._completed.append((request_id, final))
+        self._draining = False
+        if self._lock.acquire(blocking=False):
+            try:
+                self._apply_completed()
+            finally:
+                self._lock.release()
+        return final
+
+    def drain(self, execute, admit=None):
+        """Consume at most one pending entry and invoke execute at most once.
+
+        Optional owner-only admit(request) runs BEFORE the started transition,
+        with no lock held, and must explicitly return True. It must only check
+        admission, never dispatch. Receipt readers still see pending while this
+        check runs. Reacquisition is nonblocking; contention refuses the selected
+        request without requeue. TTL, closure and uncertainty are checked again.
+
+        After started is published EVERY executor exception/invalid result is
+        unknown, never a known-not-dispatched refusal. SystemExit/KeyboardInterrupt
+        preserve that record before propagation. Adapter verified is an assertion,
+        never independent evidence of build qualification or gameplay success.
         """
         _check(self._is_owner(), "wrong_thread", "Only the captured owner may drain.")
         _check(not self._draining, "reentrant_drain", "Drain must not call itself.")
         _check(callable(execute), "invalid_executor", "An execution callback is required.")
+        _check(admit is None or callable(admit), "invalid_admission", "Expected an owner admission hook.")
         self._acquire()
         try:
             self._apply_completed()
@@ -371,21 +453,56 @@ class CompanionQueue:
             old = entry.snapshot
             try:
                 now = self._now()
-                reason = "expired" if now >= old.expires_at else None
+                reason = self._closed_reason
+                if reason is None and entry.request.operation != "observe":
+                    reason = self._mutation_blocked_reason
+                if reason is None and now >= old.expires_at:
+                    reason = "expired"
             except Exception:
-                now = None
                 reason = "invalid_clock"
             self._pending.popleft()
             if reason is not None:
                 entry.snapshot = Snapshot(request_id, self._session_id, "refused", reason,
                                           admitted_at=old.admitted_at, expires_at=old.expires_at)
                 return entry.snapshot
-            entry.snapshot = Snapshot(request_id, self._session_id, "started",
-                                      admitted_at=old.admitted_at, expires_at=old.expires_at,
-                                      started_at=now)
             self._draining = True
         finally:
             self._lock.release()
+
+        try:
+            allowed = admit is None or admit(entry.request) is True
+        except BaseException as error:
+            final = self._finish(request_id, old, "refused", "host_dispatch_denied")
+            if not isinstance(error, Exception):
+                raise
+            return final
+        if not allowed:
+            return self._finish(request_id, old, "refused", "host_dispatch_denied")
+        if not self._lock.acquire(blocking=False):
+            return self._finish(request_id, old, "refused", "queue_busy_before_start")
+        reason, now = None, None
+        try:
+            self._apply_completed()
+            try:
+                now = self._now()
+                reason = self._closed_reason
+                if reason is None and entry.request.operation != "observe":
+                    reason = self._mutation_blocked_reason
+                if reason is None and now >= old.expires_at:
+                    reason = "expired"
+            except BaseException as error:
+                reason = "invalid_clock"
+                if not isinstance(error, Exception):
+                    self._finish(request_id, old, "refused", reason)
+                    raise
+            if reason is None:
+                entry.snapshot = Snapshot(request_id, self._session_id, "started",
+                                          admitted_at=old.admitted_at, expires_at=old.expires_at,
+                                          started_at=now)
+        finally:
+            self._lock.release()
+        if reason is not None:
+            return self._finish(request_id, old, "refused", reason)
 
         result = None
         state, reason = "unknown", "execution_exception"
@@ -397,17 +514,8 @@ class CompanionQueue:
             except Exception:
                 state, reason = "unknown", "invalid_execution_result"
         except Exception:
-            # No exception object/message is retained or logged; the host owns
-            # safe diagnostics and read-only reconciliation of uncertain actions.
+            # Never retain or expose exception messages, nor infer non-dispatch.
             pass
         finally:
-            final = Snapshot(request_id, self._session_id, state, reason, result,
-                             old.admitted_at, old.expires_at, now)
-            self._completed.append((request_id, final))
-            self._draining = False
-            if self._lock.acquire(blocking=False):
-                try:
-                    self._apply_completed()
-                finally:
-                    self._lock.release()
+            final = self._finish(request_id, old, state, reason, result, now)
         return final

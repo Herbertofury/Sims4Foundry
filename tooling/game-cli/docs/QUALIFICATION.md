@@ -11,12 +11,14 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | Typed semantic contracts | 45 initial operations | Python tests | No |
 | Plan/execute/reconcile | Synthetic model | Python tests and crash/lock checks | No |
 | Mod inventory/diff/staging | Real local file operations | Synthetic artifacts | No gameplay/compatibility claim |
+| DBPF resource ownership audit | Bounded header/index parser and exact TGI overlap report | Fabricated packages on Windows/Linux CI | No content/load-order/compatibility claim |
 | Apex source migration inventory | AST-only read | Historical source snapshot | Not an input adapter |
-| Passive process discovery | Bounded exact candidate reporting | Fake snapshots; native CI enumeration pending | No launch admission |
+| Operation source map | 45 source-backed lineage/gap records | Detached-data and coverage tests | No dispatch capability |
+| Passive process discovery | Bounded exact candidate reporting | Fake snapshots and native Windows CI enumeration | No launch admission |
 | Windows process/window inspection | Query-only implementation | Contract tests and native Windows CI fixture | Pending current game test |
 | WGC capture | Pinned helper implementation | Mock helper plus real PNG validation | Pending current game test |
-| No-Apex click/key/scroll/drag | Pure packet plans and injected runner only | Synthetic guard tests; fixture transport CI pending | No |
-| Foundry semantic game bridge | Uninstalled typed queue and narrow native bindings; no transport/bootstrap | Fabricated services on actual Python 3.7 | No |
+| No-Apex click/key/scroll/drag | Pure packet plans and injected runner only | Synthetic guard tests and native Windows fixture message receipts | No |
+| Foundry semantic game bridge | Uninstalled typed queue, narrow native bindings and default-denied socket transport; no bootstrap/authentication provider | Fabricated services and real isolated sockets on actual Python 3.7 | No |
 | No-Apex launch/entry/save/load/exit | Launch metadata preparation only | Synthetic EA metadata tests | No |
 
 ## Required controlled validation
@@ -26,6 +28,15 @@ Apex/CAS session or the user's activity. Inspect existing state rather than
 launching, attaching, changing a profile, or closing a preexisting process by guess.
 Keep original saves/profiles protected. Use only an explicitly authorized disposable
 profile with a matching, separately reviewed journal and a restoration procedure.
+
+The first reserved Foundry window should be passive: verify the installed CLI source
+checkpoint and tool hashes, discover/inspect the explicitly selected game lifetime,
+and test one pinned window-only capture. Do not launch, attach a mod, send input or
+close an existing game merely to obtain this evidence. A discovery report is not
+an identity file for capture: select its one qualified identity with `inspect
+--output`, then give that exact output to `capture --identity`. Failure, ambiguous
+windows, an active external controller or any ownership change ends this pass.
+Only after this evidence is reviewed should a separate single-action test begin.
 
 1. **Source parity.** Verify current helper source and dependency pins. Record which
    paths are historical, which are new, and which tests actually ran.
@@ -54,7 +65,7 @@ profile with a matching, separately reviewed journal and a restoration procedure
 
 ## Still required engineering
 
-- Wire the offline protocol, owner queue and native bindings into an independently admitted, authenticated mod-neutral host. Preserve process epoch and zone/household/save preconditions across the boundary.
+- Complete the independently admitted, authenticated mod-neutral host around the source-only transport/owner queue/native bindings. Process epoch and zone/household/save preconditions are carried across the boundary, but live admission, authentication, scheduling and durable reconciliation are not implemented.
 - A separately qualified external menu/input provider, including scroll/drag/keys.
 - Integrate the cooperative process-lifetime lease with a shared durable journal and detect nonparticipating user/Apex/other-tool interference. A lease alone does not authorize input.
 - Windows crash-durable pre-dispatch evidence ordering.
