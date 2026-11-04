@@ -55,6 +55,7 @@ def safe_relative(value):
     reserved = {"con", "prn", "aux", "nul", "conin$", "conout$"}
     reserved.update("com" + str(n) for n in range(1, 10))
     reserved.update("lpt" + str(n) for n in range(1, 10))
+    reserved.update(prefix + digit for prefix in ("com", "lpt") for digit in "¹²³")
     for part in value.split("/"):
         if (not part or part in (".", "..") or part.endswith((".", " "))
                 or any(ord(c) < 32 or c in '<>"|?*' for c in part)
@@ -181,4 +182,6 @@ def exact_int(value, low=0, high=2**31-1):
 
 
 def finite_number(value, low, high):
-    return type(value) in (int, float) and math.isfinite(value) and low <= value <= high
+    if type(value) is int:
+        return low <= value <= high
+    return type(value) is float and math.isfinite(value) and low <= value <= high

@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- `python -m unittest discover -s tests -v`: 57 tests.
+- `python -m unittest discover -s tests -v`: 62 tests.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -25,3 +25,10 @@ A separate code review found and prompted fixes for persistent crash locks,
 partial receipt publication, inconsistent JSON bounds, nonfinite exponent parsing,
 Windows reserved-path names, and shallow PNG validation. Windows power-loss
 ordering remains explicitly unqualified.
+
+Initial CI passed both Linux jobs and exposed a Windows-only test-fixture issue:
+Python's ZIP writer normalized a deliberately hostile backslash name before the
+validator saw it. The fixture now patches the raw ZIP member-name bytes on both
+platforms. This does not relax artifact path validation. Cross-platform rerun is
+required for the new source head. Strict terminal-result validation and empty-intent
+crash recovery also have dedicated regression tests.

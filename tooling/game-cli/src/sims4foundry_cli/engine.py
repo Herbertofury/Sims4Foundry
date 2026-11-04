@@ -64,19 +64,53 @@ class Session:
     def _lock(self):
         return lock(self._path("operation.lock"))
 
+    def _read_result(self, directory, plan):
+        try:
+            canonical_plan = self._read_plan(plan["plan_id"])
+            if plan != canonical_plan:
+                raise ValueError("intent changed")
+            result = read_json(directory / "result.json")
+            common = {"schema", "ok", "outcome", "operation_id", "operation", "plan_sha256",
+                      "simulation", "real_game_evidence", "dispatched_again"}
+            if result.get("outcome") == "verified_simulation":
+                exact_fields(result, common | {"before_observation_id", "after_observation_id", "mode", "recovered_by_observation"})
+                if result["ok"] is not True or type(result["recovered_by_observation"]) is not bool:
+                    raise ValueError("invalid verified receipt")
+                before = read_json(self._path("observations", _id(result["before_observation_id"]) + ".json"))
+                after = read_json(self._path("observations", _id(result["after_observation_id"]) + ".json"))
+                for observation, revision in ((before, plan["revision"]), (after, plan["revision"] + 1)):
+                    if (observation.get("session_id") != plan["session_id"] or observation.get("revision") != revision
+                            or observation.get("backend") != "simulation" or observation.get("simulation") is not True
+                            or observation.get("real_game_evidence") is not False or observation.get("source") != "synthetic_model"):
+                        raise ValueError("invalid result observation")
+                if (result["before_observation_id"] != plan["before_observation_id"]
+                        or before.get("state_sha256") != plan["before_state_sha256"]
+                        or result["mode"] != after.get("mode")):
+                    raise ValueError("result evidence changed")
+            elif result.get("outcome") == "not_dispatched":
+                exact_fields(result, common | {"message"})
+                if result["ok"] is not False or (directory / "dispatch_started.json").exists():
+                    raise ValueError("contradictory non-dispatch receipt")
+            else:
+                raise ValueError("invalid terminal state")
+            if (type(result["schema"]) is not int or result["schema"] != SCHEMA
+                    or result["simulation"] is not True or result["real_game_evidence"] is not False
+                    or result["dispatched_again"] is not False or result["operation_id"] != plan["plan_id"]
+                    or result["operation"] != plan["operation"] or result["plan_sha256"] != plan["plan_sha256"]):
+                raise ValueError("result binding changed")
+            return result
+        except (FoundryError, OSError, KeyError, ValueError, TypeError, AttributeError) as exc:
+            raise FoundryError("receipt_corrupt", "Terminal receipt or its bound evidence is invalid; no action will be replayed.", operation_id=directory.name) from exc
+
     def _pending(self):
         rows = []
         for directory in self._path("operations").iterdir():
             plain_path(directory)
             if not directory.is_dir():
                 continue
-            result_path = directory / "result.json"
-            if result_path.exists():
+            if (directory / "result.json").exists():
                 try:
-                    result = read_json(result_path)
-                    if (not isinstance(result, dict) or result.get("operation_id") != directory.name
-                            or result.get("outcome") not in ("verified_simulation", "not_dispatched")):
-                        raise FoundryError("receipt_corrupt", "Terminal receipt is invalid.")
+                    self._read_result(directory, read_json(directory / "intent.json"))
                 except (FoundryError, OSError):
                     rows.append(directory.name)
             else:
@@ -129,7 +163,7 @@ class Session:
                            "before_observation_id", "before_state_sha256", "revision", "created_at",
                            "simulation", "real_game_evidence", "plan_sha256"})
         unsigned = {key: value for key, value in plan.items() if key != "plan_sha256"}
-        if (plan["plan_id"] != plan_id or plan["schema"] != SCHEMA or plan["backend"] != "simulation"
+        if (plan["plan_id"] != plan_id or type(plan["schema"]) is not int or plan["schema"] != SCHEMA or plan["backend"] != "simulation"
                 or plan["simulation"] is not True or plan["real_game_evidence"] is not False
                 or digest(unsigned) != plan["plan_sha256"]):
             raise FoundryError("invalid_plan", "Plan identity/digest/backend changed.")
@@ -147,7 +181,7 @@ class Session:
                 if intent["plan_sha256"] != plan["plan_sha256"]:
                     raise FoundryError("intent_conflict", "Operation ID already belongs to different parameters.")
                 if (directory / "result.json").exists():
-                    return dict(read_json(directory / "result.json"), replayed_result=True, dispatched_again=False)
+                    return dict(self._read_result(directory, intent), replayed_result=True, dispatched_again=False)
                 raise FoundryError("pending_operation", "An intent already exists. Reconcile it; do not resend.", operation_id=plan_id)
             state = self.load()
             pending = self._pending()
@@ -190,7 +224,7 @@ class Session:
     def _finish(self, directory, plan, observed, recovered):
         if observed["revision"] != plan["revision"] + 1:
             raise FoundryError("postcondition_failed", "Expected exactly one state transition.")
-        result = {"ok": True, "outcome": "verified_simulation", "simulation": True,
+        result = {"schema": SCHEMA, "ok": True, "outcome": "verified_simulation", "simulation": True,
                   "real_game_evidence": False, "operation_id": plan["plan_id"],
                   "operation": plan["operation"], "plan_sha256": plan["plan_sha256"],
                   "before_observation_id": plan["before_observation_id"],
@@ -202,12 +236,21 @@ class Session:
     def reconcile(self, operation_id):
         with self._lock():
             directory = self._path("operations", _id(operation_id))
-            plan = read_json(directory / "intent.json")
+            if directory.is_dir() and not (directory / "intent.json").exists():
+                if (directory / "dispatch_started.json").exists() or (directory / "result.json").exists():
+                    raise FoundryError("receipt_corrupt", "Dispatch/result exists without its intent. Preserve evidence and do not replay.", operation_id=operation_id)
+                # A crash between mkdir and atomic intent publication cannot
+                # have dispatched. Recover only the exact already-saved plan.
+                plan = self._read_plan(operation_id)
+                new_json(directory / "intent.json", plan)
+            else:
+                plan = read_json(directory / "intent.json")
             if (directory / "result.json").exists():
-                return dict(read_json(directory / "result.json"), replayed_result=True, dispatched_again=False)
+                return dict(self._read_result(directory, plan), replayed_result=True, dispatched_again=False)
             if not (directory / "dispatch_started.json").exists():
-                result = {"ok": False, "outcome": "not_dispatched", "operation_id": operation_id,
-                          "simulation": True, "dispatched_again": False,
+                result = {"schema": SCHEMA, "ok": False, "outcome": "not_dispatched", "operation_id": operation_id,
+                          "operation": plan["operation"], "plan_sha256": plan["plan_sha256"],
+                          "simulation": True, "real_game_evidence": False, "dispatched_again": False,
                           "message": "Durable dispatch marker absent. This intent is closed; create a fresh plan."}
                 new_json(directory / "result.json", result)
                 return result

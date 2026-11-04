@@ -81,7 +81,7 @@ class IOTests(unittest.TestCase):
                 external_path(self.root / name / "new")
 
     def test_windows_relative_names(self):
-        for name in ("CON.package", "nul.ts4script", "COM1.package", "folder./a.package", "folder /a.package",
+        for name in ("CON.package", "nul.ts4script", "COM1.package", "COM¹.package", "LPT².package", "folder./a.package", "folder /a.package",
                      "a\x00.package", "a?/b.package", "C:/a.package", "../a.package", "a\\b.package", "a//b.package"):
             with self.subTest(name=name):
                 self.assertFalse(safe_relative(name))
@@ -118,7 +118,12 @@ class ModTests(unittest.TestCase):
         for name in ("../evil.py", "CON.py", "folder./evil.py", "/absolute.py", "a\\b.py"):
             with self.subTest(name=name):
                 with zipfile.ZipFile(self.script, "w") as archive:
-                    archive.writestr(name, "content")
+                    archive.writestr(name.replace("\\", "/"), "content")
+                if "\\" in name:
+                    # ZipInfo normalizes separators on Windows; patch both
+                    # same-length member-name fields to exercise hostile ZIP bytes.
+                    raw = self.script.read_bytes()
+                    self.script.write_bytes(raw.replace(name.replace("\\", "/").encode(), name.encode()))
                 with self.assertRaises(FoundryError):
                     mods.inspect_artifact(self.script)
 

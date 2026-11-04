@@ -61,6 +61,52 @@ class EngineTests(unittest.TestCase):
         self.assertFalse(again["dispatched_again"])
         self.assertEqual(1, self.session.load()["revision"])
 
+    def test_corrupt_result_cannot_clear_pending_or_claim_real_evidence(self):
+        p = self.session.plan("game.launch", {})["plan"]
+        self.session.execute(p["plan_id"], p["plan_sha256"])
+        path = self.root / "operations" / p["plan_id"] / "result.json"
+        valid = read_json(path)
+        mutations = ({"real_game_evidence": True}, {"plan_sha256": "wrong"}, {"simulation": False},
+                     {"mode": "cas"}, {"after_observation_id": "0" * 32}, {"ok": 1})
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                replace_json(path, dict(valid, **mutation))
+                self.assertEqual([p["plan_id"]], self.session.status()["pending_operations"])
+                self.assert_code("receipt_corrupt", lambda: self.session.reconcile(p["plan_id"]))
+                self.assert_code("receipt_corrupt", lambda: self.session.execute(p["plan_id"], p["plan_sha256"]))
+                self.assert_code("pending_operation", lambda: self.session.plan("game.new", {}))
+        replace_json(path, valid)
+        self.assertEqual([], self.session.status()["pending_operations"])
+
+    def test_truncated_result_stays_pending(self):
+        p = self.session.plan("game.launch", {})["plan"]
+        self.session.execute(p["plan_id"], p["plan_sha256"])
+        (self.root / "operations" / p["plan_id"] / "result.json").write_text('{"ok":')
+        self.assertEqual([p["plan_id"]], self.session.status()["pending_operations"])
+        self.assert_code("receipt_corrupt", lambda: self.session.reconcile(p["plan_id"]))
+
+    def test_empty_operation_directory_recovers_as_not_dispatched(self):
+        p = self.session.plan("game.launch", {})["plan"]
+        (self.root / "operations" / p["plan_id"]).mkdir()
+        self.assertEqual([p["plan_id"]], self.session.status()["pending_operations"])
+        result = self.session.reconcile(p["plan_id"])
+        self.assertEqual("not_dispatched", result["outcome"])
+        self.assertFalse(result["real_game_evidence"])
+        self.assertEqual([], self.session.status()["pending_operations"])
+        self.assertEqual(0, self.session.load()["revision"])
+
+    def test_dispatch_marker_without_intent_stays_blocked(self):
+        from sims4foundry_cli.io import new_json
+        p = self.session.plan("game.launch", {})["plan"]
+        directory = self.root / "operations" / p["plan_id"]
+        directory.mkdir()
+        new_json(directory / "dispatch_started.json", {})
+        self.assert_code("receipt_corrupt", lambda: self.session.reconcile(p["plan_id"]))
+        self.assertEqual([p["plan_id"]], self.session.status()["pending_operations"])
+
+    def test_huge_integer_is_structured_validation_error(self):
+        self.assert_code("invalid_argument", lambda: CATALOG["cas.set_physique"].validate({"fitness": 10 ** 400, "weight": 0}))
+
     def test_stale_plan_refused(self):
         p = self.session.plan("game.launch", {})["plan"]
         self.execute("game.launch")
