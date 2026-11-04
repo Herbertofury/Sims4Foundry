@@ -5,12 +5,14 @@ No game/profile/desktop access, production policy or live qualification.
 The fixture-server branch also runs in an isolated Python 3.7 subprocess.
 """
 from copy import deepcopy
+from contextlib import contextmanager
 from dataclasses import replace
 import errno
 import json
 import os
 from pathlib import Path
 import queue
+import re
 import socket
 import subprocess
 import sys
@@ -210,6 +212,46 @@ def admit(_message, _ticket):
     return True  # Fabricated local admission only.
 
 
+def callback_diagnostic(error):
+    """Bounded fabricated-fixture type/code/errno fields, no exception messages."""
+    name = type(error).__name__
+    if re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]{0,63}', name) is None:
+        name = 'Exception'
+    fields = ['type=' + name]
+    code = getattr(error, 'code', None)
+    if type(code) is str and re.fullmatch(r'[a-z][a-z0-9_]{0,63}', code):
+        fields.append('code=' + code)
+    for name in ('errno', 'winerror'):
+        value = getattr(error, name, None)
+        if type(value) is int and -(2**31) <= value < 2**31:
+            fields.append('{}={}'.format(name, value))
+    return ', '.join(fields)
+
+
+@contextmanager
+def elapsed_after_receipt(seconds):
+    """Advance only the client clock after a real authenticated reply and EOF.
+
+    A deterministic scheduling-budget probe, not a sleep or fake socket reply.
+    The client view is anchored at its exchange start, then advances exactly by
+    seconds at receipt parsing; wall runtime cannot consume the probe's margin.
+    Server/auth clocks and deadlines, socket I/O and peer checks stay real.
+    """
+    original_parse, original_clock = client.parse_receipt, client.monotonic
+    started, elapsed = [None], [0]
+    def clock():
+        if started[0] is None:
+            started[0] = original_clock()
+        return started[0] + elapsed[0]
+    def parse(value, item):
+        result = original_parse(value, item)
+        elapsed[0] = seconds
+        return result
+    with patch.object(client, 'parse_receipt', parse), patch.object(
+            client, 'monotonic', clock):
+        yield
+
+
 class OwnedCall:
     """Capture and later assert every worker exception, including assertions."""
     def __init__(self, callback):
@@ -334,12 +376,15 @@ class RecoveryTests(unittest.TestCase):
         self.addCleanup(fixture.close)
         return fixture
 
-    def exchange(self, fixture, timeout=2, key=KEY):
+    def exchange(self, fixture, timeout=BOUND, key=KEY):
+        # Happy paths use the fixture's four-second scheduling budget, within
+        # the real server's five-second deadline. Fault cases pass their own
+        # shorter deadlines; there is still exactly one exchange and no retry.
         peer = companion_auth.SessionKeyPeer(key)
         def exchange(message, ticket):
             self.calls.append((message, ticket))
-            self.before_socket.append((disk_records(self.root), json.loads((self.root / 'head.json').read_text())))
             try:
+                self.before_socket.append((disk_records(self.root), json.loads((self.root / 'head.json').read_text())))
                 return client.exchange_once(fixture.port, message, authorize_peer=peer, timeout_seconds=timeout)
             except BaseException as error:
                 self.exchange_errors.append(error)
@@ -347,11 +392,25 @@ class RecoveryTests(unittest.TestCase):
         return exchange
 
     def submit(self, fixture, **kwargs):
-        return self.journal.submit_once(self.item, authorize=admit, exchange=self.exchange(fixture, **kwargs))
+        return self.with_callback_diagnostics(lambda: self.journal.submit_once(
+            self.item, authorize=admit, exchange=self.exchange(fixture, **kwargs)))
 
-    def reconcile(self, fixture):
-        return ledger.Journal(self.root).reconcile(self.item.request.request_id, authorize=admit,
-                                                 exchange=self.exchange(fixture))
+    def reconcile(self, fixture, **kwargs):
+        return self.with_callback_diagnostics(lambda: ledger.Journal(self.root).reconcile(
+            self.item.request.request_id, authorize=admit, exchange=self.exchange(fixture, **kwargs)))
+
+    def with_callback_diagnostics(self, callback):
+        before = len(self.exchange_errors)
+        try:
+            return callback()
+        except FoundryError as error:
+            if len(self.exchange_errors) > before:
+                # Preserve the journal's original fail-closed exception/code.
+                # Only this call's last callback error is relevant, not an
+                # earlier intentional auth/EOF/timeout fault in the same test.
+                error.add_note('Owned loopback fixture callback: '
+                               + callback_diagnostic(self.exchange_errors[-1]))
+            raise
 
     def assert_code(self, expected, callback):
         with self.assertRaises(FoundryError) as caught:
@@ -610,6 +669,42 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(0, fixture.stats()['executions'])
         self.assertEqual('verified', fixture.tick())
         self.assert_verified_is_unresolved(self.reconcile(fixture))
+
+    def test_happy_fixture_allows_bounded_scheduling_after_receipt_eof(self):
+        fixture = self.fixture()
+        self.submit(fixture)
+        self.assertEqual('verified', fixture.tick())
+        with elapsed_after_receipt(2.5):
+            self.assert_verified_is_unresolved(self.reconcile(fixture))
+        self.assertEqual([], self.exchange_errors)
+        self.assertEqual(['submit', 'receipt_read'], [x['kind'] for x in fixture.stats()['messages']])
+        self.assertEqual(1, fixture.stats()['executions'])
+
+    def test_explicit_short_budget_after_receipt_eof_remains_uncertain(self):
+        fixture = self.fixture()
+        self.submit(fixture)
+        self.assertEqual('verified', fixture.tick())
+        with elapsed_after_receipt(2.5), self.assertRaises(FoundryError) as caught:
+            self.reconcile(fixture, timeout=2)
+        self.assertEqual('exchange_uncertain', caught.exception.code)
+        self.assertEqual(['Owned loopback fixture callback: type=ProtocolError, code=connection_deadline'],
+                         caught.exception.__notes__)
+        self.assertEqual(1, len(self.exchange_errors))
+        self.assertIsInstance(self.exchange_errors[0], v1.ProtocolError)
+        self.assertEqual('connection_deadline', self.exchange_errors[0].code)
+        self.assertTrue(self.assert_no_replay().uncertainty_latched)
+        self.assert_blocked()
+        self.assertIsNone(fixture.tick())
+        self.assertEqual(['submit', 'receipt_read'], [x['kind'] for x in fixture.stats()['messages']])
+        self.assertEqual(1, fixture.stats()['executions'])
+
+    def test_callback_diagnostics_exclude_messages_and_invalid_codes(self):
+        private = 'FABRICATED-PRIVATE-DATA-' * 1000
+        error = v1.ProtocolError(private, private)
+        self.assertEqual('type=ProtocolError', callback_diagnostic(error))
+        error = OSError(errno.ECONNRESET, private)
+        self.assertEqual('type=ConnectionResetError, errno={}'.format(errno.ECONNRESET),
+                         callback_diagnostic(error))
 
     def test_actual_python37_reply_loss_recovery(self):
         self.run_lost_reply('drop', process=True)

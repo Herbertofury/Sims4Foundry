@@ -37,6 +37,11 @@ adapter outcomes are fabricated. No game, profile, desktop or account is accesse
   current process epoch is similarly refused. A wrong handshake process epoch or
   session key never reaches application admission. Changing an existing ID's
   immutable context is rejected locally before another socket exchange.
+- A separate deterministic client-clock probe advances exactly 2.5 seconds after
+  receiving and parsing a real authenticated reply and EOF. A two-second budget
+  remains uncertain with no replay; the four-second happy-path fixture budget
+  accepts the same simulated elapsed time. Server/auth clocks and socket I/O stay
+  real. This is not evidence that a prior Windows CI failure had that cause.
 
 The context comparison is a **test host policy**, not a context-verification
 feature supplied by the transport. The cryptographic exchange proves possession
@@ -60,6 +65,12 @@ or killed only as cleanup and the test still fails. No unrelated process is
 signaled. The fault's underlying timeout/EOF/reset category is asserted rather
 than accepting any error merely because the journal reports uncertainty.
 
+Happy exchanges use a four-second fixture budget below the server's five-second
+limit. Explicit shorter timeout/loss cases keep their original limits. Unexpected
+journal failures preserve their original exception and attach only bounded test
+callback type/code/errno notes, never exception text, arguments, keys or wire data.
+These test changes do not alter production deadlines or automatic retry behavior.
+
 ## Run
 
 From `tooling/game-cli`, using Python 3.11 or newer:
@@ -81,7 +92,7 @@ Run the full current-interpreter suite with the same optional environment variab
 PYTHONPATH=src python -B -m unittest discover -s tests -v
 ```
 
-On 2026-11-04, all 14 recovery cases passed in the Linux cloud workspace, including
+On 2026-11-04, all 17 recovery cases passed in the Linux cloud workspace, including
 both actual Python 3.7.17 server cases. These are source integration regressions,
 not game qualification, a production security audit, or Windows runtime evidence.
 They exercise ordinary durable file publication and journal reopening, not power

@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 750 tests collected, 736 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 753 tests collected, 739 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -388,4 +388,25 @@ No native reader, event, action, clock, CLI or protocol route was introduced.
 
 The existing two-OS CI matrix also adds Python 3.14, preserving action pins,
 permissions and test commands. Six hosted jobs now need exact-head verification;
-the local 750-test run above is Python 3.12, not evidence of Python 3.14 support.
+the preceding local run was Python 3.12, not evidence of Python 3.14 support.
+
+At Live-fixture head 6fa1888138e19fba9be10c2c8ce5cd9c9bcc2068, all six push
+jobs passed. Setup logs identify Python 3.14.10 on Windows and 3.14.9 on Linux.
+The exact-source wheel also passed isolated import, synthetic workflow, journal,
+staging, launch-metadata and lossless Live-fixture checks. However, the PR workflow
+failed one existing Windows 3.11 receipt-recovery test after authenticated
+dispatch. The journal reported uncertainty and did not replay. Its test helper
+hid the underlying callback cause, so the historical cause remains unproven.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41831912433
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41831921361
+
+The test-only correction retains bounded callback type/code/errno diagnostics
+without exception text. Happy-path exchanges use the existing four-second fixture
+budget, still below the five-second server deadline; explicit short timeout and
+EOF-loss cases are unchanged. A client-only virtual clock, anchored at exchange
+start, advances exactly 2.5 seconds after parsing a real authenticated receipt and
+EOF. This reproducibly distinguishes the two- and four-second fixture budgets
+without claiming to reproduce the historical Windows cause. The short case stays
+uncertain with one dispatch and no replay. Production limits, journal behavior
+and cleanup remain unchanged. All 17 recovery cases, including actual Python 3.7
+subprocesses, and the full local suite above pass. Exact-head hosted CI is pending.
