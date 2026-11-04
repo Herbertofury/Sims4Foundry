@@ -215,3 +215,14 @@ companion integration passes as counted above. Actual native image pinning,
 input-desktop observation and backend packet delivery still require exact-head
 Windows CI. The public native entry always refuses and game qualification remains
 absent. See [NATIVE_INPUT.md](NATIVE_INPUT.md).
+
+At native-backend head 4cb97b50542df61fa362951f3ae5b228a96b6362, all four
+Windows/Linux Python 3.11/3.13 jobs passed, in both push and pull-request workflows.
+The Windows logs explicitly report all four new click/key/wheel/drag backend tests
+as passed, not skipped. They exercise actual image pinning, input-desktop queries,
+PostMessage packet receipts and unchanged cursor/foreground on freshly compiled
+synthetic windows. This is still not Sims, a real recorder, game/UI lifetime
+proof or production admission. The exact-source wheel also passed an isolated
+no-site-packages import, the synthetic 14-step workflow, passive journal status
+and unconditional public native-input refusal. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41818794815

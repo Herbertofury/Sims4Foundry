@@ -18,7 +18,7 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | Passive process discovery | Bounded exact candidate reporting | Fake snapshots and native Windows CI enumeration | No launch admission |
 | Windows process/window inspection | Query-only implementation | Contract tests and native Windows CI fixture | Pending current game test |
 | WGC capture | Pinned helper implementation | Mock helper plus real PNG validation | Pending current game test |
-| No-Apex click/key/scroll/drag | Pure packet plans, injected runner and source-only native backend with always-denied public entry | Synthetic guards and earlier Windows packet receipts; new backend fixtures require exact-head CI | No |
+| No-Apex click/key/scroll/drag | Pure packet plans, injected runner and source-only native backend with always-denied public entry | Native backend click/key/wheel/drag packet receipts and unchanged cursor/foreground on disposable Windows fixtures | No |
 | Foundry semantic game bridge | Uninstalled typed queue, narrow native bindings, default-denied socket transport and explicit-key peer hooks; no bootstrap/admitted host | Fabricated services and real isolated sockets on actual Python 3.7 | No |
 | No-Apex launch/entry/save/load/exit | Launch metadata preparation only | Synthetic EA metadata tests | No |
 
