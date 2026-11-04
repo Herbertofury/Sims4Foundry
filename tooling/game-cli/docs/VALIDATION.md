@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 722 tests collected, 708 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 750 tests collected, 736 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -370,3 +370,22 @@ public-source identity and outcome caveats. It introduces no adapter or dispatch
 support: tuning GUIDs are not queue-instance IDs, unavailable readers are not
 empty-state proof, and enqueue/cancel returns or pre-call events are not verified
 completion. Current installed-game behavior remains untested.
+
+At Build-observation head 89d4ff93fa4aa1da95cc1198035758f130200117, all four
+Windows/Linux Python 3.11/3.13 jobs passed in both push and pull-request workflows.
+The Windows 3.13 log explicitly passed all 48 Build-observation tests, with 722
+tests collected and 9 total skips. The PR head matched the source checkpoint.
+Run: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41829895044
+
+The pure Live fixture contract adds 28 tests for explicit availability, ordered
+queued/running rows, duplicate tuning IDs, transient instance references,
+snapshot-local handles, detached aliases and bounded malformed data. All IDs
+use canonical positive uint64 decimal strings, including lossless JSON round
+trips around 2**53 and at uint64 maximum. Review prompted this representation
+instead of JSON numeric IDs, and explicit machine-readable handle scope.
+Every result stays offline-fixture, non-atomic, unqualified and unknown-outcome.
+No native reader, event, action, clock, CLI or protocol route was introduced.
+
+The existing two-OS CI matrix also adds Python 3.14, preserving action pins,
+permissions and test commands. Six hosted jobs now need exact-head verification;
+the local 750-test run above is Python 3.12, not evidence of Python 3.14 support.

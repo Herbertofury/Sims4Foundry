@@ -32,6 +32,8 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
   inspection. Unknown mutations cannot be retried or cleared through the CLI.
 - An uninstalled, default-denied Build observation seam for explicit object IDs
   and transition notifications, tested only with injected fabricated readers.
+- A pure Live-queue fixture validator that separates unavailable channels, tuning
+  IDs and transient occurrence references without inferring action completion.
 - Windows-only process/window identity inspection and pinned FFmpeg WGC capture
   implementations. Their native paths still need controlled Windows/game validation.
 
@@ -205,6 +207,8 @@ risk. Launch can itself activate a window even without an explicit focus call.
 Run the full unittest suite after every change. It never requires Sims, Apex or a
 running desktop. CI uses Linux and Windows runners, including an isolated native-window fixture,
 but does not test the game or run on the user's desktop.
+The hosted matrix exercises Python 3.11, 3.13 and 3.14 on both operating systems;
+new matrix entries require successful runs before compatibility is claimed.
 See [Architecture](docs/ARCHITECTURE.md), [Validation](docs/VALIDATION.md) and
 [qualification gates](docs/QUALIFICATION.md) before adding real mutation support.
 
@@ -236,6 +240,9 @@ commands. Generic status-read permission does not admit these expanded reads.
 tuning IDs, enqueue results, bulk cancellation returns and pre-call events are
 not sufficient evidence of exact interaction identity or completion. Neither
 addition enables real Build or Live actions.
+The [Live fixture contract](docs/LIVE_OBSERVATION.md) validates bounded supplied
+data only. It preserves exact decimal-string IDs, unknown outcomes and separate
+queued/running availability without native reads, events or CLI integration.
 
 ## Passive process discovery
 

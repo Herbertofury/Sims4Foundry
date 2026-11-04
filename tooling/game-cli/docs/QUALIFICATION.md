@@ -21,6 +21,7 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | No-Apex click/key/scroll/drag | Pure packet plans, injected runner and source-only native backend with always-denied public entry | Native backend click/key/wheel/drag packet receipts and unchanged cursor/foreground on disposable Windows fixtures | No |
 | Foundry semantic game bridge | Uninstalled typed queue, narrow native bindings, default-denied socket transport and explicit-key peer hooks; no bootstrap/admitted host | Fabricated services and real isolated sockets on actual Python 3.7 | No |
 | Build object/mode observation | Uninstalled, separately admitted explicit-ID reader and transition-observation seam | Injected fabricated readers on current Python and actual Python 3.7 | No atomic/native/world-state proof |
+| Live queue observation contract | Pure bounded fixture validator, no native reader or action methods | Fabricated availability/identity/order/bounds tests | No |
 | No-Apex launch/entry/save/load/exit | Launch metadata preparation only | Synthetic EA metadata tests | No |
 
 ## Required controlled validation
@@ -76,6 +77,8 @@ Only after this evidence is reviewed should a separate single-action test begin.
   starting point, not a qualified reader. The [Live interaction source review](LIVE_INTERACTION_RESEARCH.md)
   separates tuning IDs from queue occurrences and pre-call events from completion;
   native queue observation, instance correlation and action outcomes remain open.
+  The [Live fixture validator](LIVE_OBSERVATION.md) makes those data distinctions
+  explicit but supplies no native observer, scheduler or outcome verification.
 - Reviewed, reversible mod installation/update/rollback on a closed disposable
   profile. Staging currently stops before installation.
 - Coverage expansion beyond the initial operation catalog, driven by real tasks.
