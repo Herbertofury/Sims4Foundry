@@ -257,6 +257,13 @@ def _script_archive_view(stream, size):
 
 
 def inspect_artifact(path):
+    # Keep the public artifact contract unchanged. Optional report collection
+    # belongs to the same validated archive lifetime, before final drift checks.
+    return _inspect_artifact(path)[0]
+
+
+def _inspect_artifact(path, script_inspector=None):
+    details = None
     path = plain_path(path)
     if not safe_relative(path.name) or not path.is_file() or path.suffix.lower() not in (".package", ".ts4script"):
         raise FoundryError("unsupported_artifact", "Only regular .package and .ts4script files are accepted.")
@@ -292,13 +299,15 @@ def inspect_artifact(path):
                 bad = archive.testzip()
                 if bad:
                     raise FoundryError("archive_crc", "Script archive failed CRC validation.", member=bad)
+                if script_inspector is not None:
+                    details = script_inspector(archive, rows)
                 _script_size(stream, size)
                 inspection = {"kind": "ts4script_zip", "validation": "bounded_members_and_crc", "member_count": len(rows), "code_executed": False}
         except _SCRIPT_ZIP_ERRORS as exc:
             raise FoundryError("invalid_script_archive", "Unsupported or invalid script ZIP.") from exc
     if _hash_artifact(path, size) != before or path.stat().st_size != size:
         raise FoundryError("artifact_changed", "Source changed during inspection; no artifact was accepted.")
-    return {"name": path.name, "source": str(path), "bytes": size, "sha256": before, **inspection}
+    return {"name": path.name, "source": str(path), "bytes": size, "sha256": before, **inspection}, details
 
 
 def _inventory_files(directory):

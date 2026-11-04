@@ -4,7 +4,7 @@ from dataclasses import asdict
 import json
 import sys
 from . import __version__
-from . import apex, mods, windows, workflows, launch, discovery, package_resources
+from . import apex, mods, windows, workflows, launch, discovery, package_resources, bytecode_headers
 from .catalog import CATALOG, capabilities
 from .engine import Session, create_session
 from .companion_journal import Journal
@@ -70,6 +70,10 @@ def parser():
     inv.add_argument("--output")
     check = sub.add_parser("check")
     check.add_argument("--file", required=True)
+    bytecode = sub.add_parser("bytecode", help="Report bounded PYC header bytes; never a compatibility verdict")
+    bytecode.add_argument("--file", required=True)
+    bytecode.add_argument("--target-magic", help="Exactly eight ASCII hexadecimal characters in file-byte order")
+    bytecode.add_argument("--output")
     resources = sub.add_parser("resources", help="Read a bounded DBPF 2.1 resource index; no body extraction")
     resources.add_argument("--file", required=True)
     resources.add_argument("--output")
@@ -135,6 +139,11 @@ def run(args):
     if args.command == "capture":
         return windows.capture(read_json(args.identity), args.ffmpeg, args.ffmpeg_sha256, args.destination)
     if args.command == "mods":
+        if args.action == "bytecode":
+            result = bytecode_headers.inspect_headers(args.file, args.target_magic)
+            if args.output:
+                new_json(external_path(args.output), result)
+            return result
         if args.action in ("resources", "overlaps"):
             result = (package_resources.inspect_resources(args.file) if args.action == "resources"
                       else package_resources.audit_overlaps(args.file))

@@ -12,6 +12,7 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | Plan/execute/reconcile | Synthetic model | Python tests and crash/lock checks | No |
 | Companion client intent/receipt ledger | Bounded immutable history and default-denied injected callback seam | Fabricated temp-file/process-crash/publication-failure tests | No |
 | Mod inventory/diff/staging | Real local file operations | Synthetic artifacts | No gameplay/compatibility claim |
+| Script bytecode-header report | Bounded selected-archive prefix inspection and optional target-byte comparison | Fabricated headers and source-backed layout checks | No body/importability/game compatibility claim |
 | DBPF resource ownership audit | Bounded header/index parser and exact TGI overlap report | Fabricated packages on Windows/Linux CI | No content/load-order/compatibility claim |
 | Apex source migration inventory | AST-only read | Historical source snapshot | Not an input adapter |
 | Operation source map | 45 source-backed lineage/gap records | Detached-data and coverage tests | No dispatch capability |

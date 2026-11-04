@@ -15,6 +15,8 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
 - Real offline `.package` signature checks, [bounded `.ts4script` ZIP/CRC checks](docs/SCRIPT_ARCHIVE.md)
   with metadata limits before stdlib allocation, inventory/diff and verified copies
   into a new external staging directory. Stored/Deflate is the deliberate subset.
+- An opt-in script-bytecode header report with caller-supplied magic comparison,
+  without importing or unmarshalling members or inferring the game runtime.
 - Bounded DBPF 2.1 resource-index inspection and exact type/group/instance
   overlap reports for explicitly selected packages, without extracting resources.
 - Read-only EA launch metadata preparation using the exact installation and a
@@ -156,10 +158,23 @@ Repeated exact type/group/instance keys identify competing resource owners, not
 load order or a safe merge. Only equal whole-package hashes establish identical
 package bytes; equal resource metadata does not establish equal resource bodies.
 
-ZIP checks do not prove
-Python/game-version compatibility, gameplay correctness or malware safety. Inventory
-and resource reports contain local source paths; keep them private unless reviewed
-for sharing.
+For a bounded bytecode-header report from a selected script candidate:
+
+```sh
+foundry-game mods bytecode --file ./candidate/Example.ts4script --output ./bytecode-headers.json
+```
+
+An optional `--target-magic HEX8` compares the first four bytes with an explicitly
+supplied target, without selecting a runtime or using the host Python's magic.
+Only pinned reference layouts are decoded. Unknown layouts stay unknown; even
+matching magic cannot validate a code body or establish importer/game support.
+Exit zero means the report was generated and can include mismatches or incomplete
+headers. The command does not change ordinary checks or staging policy. See
+[bytecode-header inspection](docs/BYTECODE_HEADERS.md) for bounds and findings.
+
+ZIP/header checks do not prove Python/game-version compatibility, gameplay
+correctness or malware safety. Inventory, resource and header reports contain
+local source paths; keep them private unless reviewed for sharing.
 
 ## Prepare an EA launch without executing it
 

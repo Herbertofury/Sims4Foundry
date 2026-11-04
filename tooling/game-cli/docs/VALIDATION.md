@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 783 tests collected, 769 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 810 tests collected, 796 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -438,3 +438,32 @@ local suite above passes with actual Python 3.7 subprocess fixtures enabled.
 This checks fabricated archives without extraction or execution, not game
 compatibility or malware safety. Exact-head hosted CI is pending. See
 [SCRIPT_ARCHIVE.md](SCRIPT_ARCHIVE.md) for format and concurrent-writer limits.
+
+At script-metadata head 857bbf9aa01dd93e81105d9666affd98a114c74d, all six
+Windows/Linux Python 3.11/3.13/3.14 jobs passed in both push and PR workflows.
+The Windows 3.14 PR log explicitly passed 29 new archive tests and skipped the
+POSIX-only open-file replacement fixture: 783 tests collected, 10 total skips.
+The isolated wheel passed synthetic workflow, journal, default input refusal,
+launch-metadata, Live-fixture, real fabricated ZIP/CRC checks, metadata-bound
+refusal and never-in-place mod staging. It contains no installable companion.
+Wheel SHA-256:
+68f1d214882daa7078c68948171f880700afc71c1e345d882e0b6ca8774d64a8.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41837262718
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41837272266
+
+The opt-in bytecode-header report adds 27 tests and preserves ordinary artifact
+inspection/staging contracts. Full CRC validation precedes retained 16-byte
+prefix reads through the same bounded archive view; source drift checks follow
+collection. Target comparison is independent of reference layout parsing, with
+explicit flags-2 loader divergence, unknown layouts and non-vacuous comparison
+counts. Narrow row/name budgets and the actual indented JSON size bound precede
+publication. Exit zero can contain mismatches and is not a compatibility verdict.
+
+Independent review passed the 108 focused archive/mod/report tests plus ten
+extra adversarial review cases covering 294 header/compression/length combinations,
+JSON escaping, short reads, CRC failures, source mutation and output bounds. A
+separate check also compiled only original harmless fixture source with official isolated
+CPython 3.7.17, then inspected a Deflate archive of timestamp, checked-hash and
+unchecked-hash results without importing or executing them. Their prefixes match
+the pinned reference fields. No real mod, installed game runtime or compatibility
+was tested. The combined local suite above passes; exact-head hosted CI is pending.
