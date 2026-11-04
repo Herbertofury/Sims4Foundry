@@ -3,3 +3,7 @@ node_modules/
 __pycache__/
 *.pyc
 .DS_Store
+*.egg-info/
+build/
+dist/
+tooling/game-cli/scratch/

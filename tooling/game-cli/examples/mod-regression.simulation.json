@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "name": "Synthetic CAS, Live, Build, save/reload regression",
+  "backend": "simulation",
+  "steps": [
+    {"operation": "game.launch", "arguments": {}},
+    {"operation": "game.new", "arguments": {}},
+    {"operation": "cas.set_name", "arguments": {"first_name": "Foundry", "last_name": "Fixture"}},
+    {"operation": "cas.apply_part", "arguments": {"part_id": "fixture.hair.1", "body_type": "hair"}},
+    {"operation": "cas.accept", "arguments": {}},
+    {"operation": "live.set_speed", "arguments": {"speed": 0}},
+    {"operation": "live.interact", "arguments": {"actor_id": "fixture.sim", "target_id": "fixture.chair", "interaction_id": "fixture.sit"}},
+    {"operation": "build.enter", "arguments": {}},
+    {"operation": "build.place", "arguments": {"catalog_id": "fixture.table", "x": 2, "y": 3, "floor": 0, "rotation": 90}},
+    {"operation": "build.exit", "arguments": {}},
+    {"operation": "game.save", "arguments": {"slot_id": "fixture.slot", "slot_name": "Synthetic fixture"}},
+    {"operation": "game.main_menu", "arguments": {"save_policy": "save"}},
+    {"operation": "game.load", "arguments": {"slot_id": "fixture.slot"}},
+    {"operation": "game.exit", "arguments": {"save_policy": "save"}}
+  ]
+}

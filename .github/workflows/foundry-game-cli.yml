@@ -1,0 +1,35 @@
+name: Foundry game CLI offline checks
+on:
+  push:
+    paths:
+      - 'tooling/game-cli/**'
+      - '.github/workflows/foundry-game-cli.yml'
+  pull_request:
+    paths:
+      - 'tooling/game-cli/**'
+      - '.github/workflows/foundry-game-cli.yml'
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.13', '3.14']
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: tooling/game-cli
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --no-deps -e .
+      - run: python -m compileall -q src
+      - run: python -m unittest discover -s tests -v
+        env:
+          FOUNDRY_LOOPBACK_OWNER_NATIVE_FIXTURE: '1'
+      - run: foundry-game capabilities
+      - run: foundry-game workflow validate --file examples/mod-regression.simulation.json
