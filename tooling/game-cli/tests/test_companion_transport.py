@@ -455,7 +455,9 @@ class TransportTests(unittest.TestCase):
         for _ in range(4):
             self.assertEqual(first, self.send(value))
             self.assertEqual(first, self.send(query(value)))
-            self.assertIs(old, self.server._queue.status(old.request_id))
+            _snapshot_view = self.server._queue.status(old.request_id)
+            self.assertEqual(old, _snapshot_view)
+            self.assertIsNot(old, _snapshot_view)
         self.assertEqual(1, len(self.policy.submits))
         calls = Mock(side_effect=verified)
         self.server.owner_tick(calls)

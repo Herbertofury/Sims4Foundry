@@ -36,6 +36,15 @@ TTLs are not silently treated as the same immutable envelope. An existing exact
 ID returns its recorded status without admission or exchange; conflicting reuse
 refuses. IDs are unique across the entire ledger, not just within a session.
 
+The separate [schema-3 Live read](LIVE_READ_ROUTE.md) is an exact-type additive
+intent: actor, full zone/household/client/save/generation context and exact Live
+mode join session, process lifetime and TTL in its canonical digest. It is never
+projected into the old generic observation request. Exact typed dispatch chooses
+the corresponding receipt parser/query and read-versus-mutation classification;
+it does not widen the legacy sender or accept arbitrary operations. Old journal
+record shapes and limits remain unchanged. Older readers encountering a new
+intent fail closed; no automatic downgrade or rewrite is provided.
+
 `record_intent(submission)` only publishes intent. It is deliberately not a
 prepare-now/send-later API: once an intent exists, `submit_once` will only return
 its status. A crash or interruption cannot turn old intent into a fresh attempt.
@@ -73,6 +82,16 @@ Arbitrary trusted Python can perform arbitrary actions or hang; the ledger is
 not a sandbox and cannot preempt a callback. Normal callback exceptions use
 static unchained diagnostics. Callback mutation of message/ticket values is
 refused; later receipt validation uses freshly reloaded persisted intent.
+
+Authorization and exchange receive separately reconstructed message and attempt
+views. The attempt's six fields use exact primitive types and bounded values;
+class-defined serializers and captured primitives protect the comparison from
+instance-shadowed serializer methods. A retained authorization view therefore
+cannot redirect the later supplied exchange view. Post-exchange binding drift
+remains uncertain, with the original immutable attempt retained. These checks
+protect supplied views and ledger consistency, not arbitrary Python execution.
+Replaying a schema-3 receipt summary also rejects an impossible `verified`
+adapter outcome, even when its local unkeyed record hashes have been recomputed.
 
 ## Receipt-only reconciliation and evidence boundaries
 
@@ -113,6 +132,9 @@ Arbitrary adapter details, exception messages, keys, auth nonces and proofs are
 not stored. A digest of the complete original receipt preserves consistency and
 terminal comparison without retaining its arbitrary result body. The ledger
 accepts no credential/account fields and does not integrate with peer-key storage.
+For schema-3 Live reads, this also means the journal summary cannot reconstruct
+the observation or distinguish its inner `observed`/`unavailable` read status.
+The validated direct receipt carries that information; no body store is added.
 Use fabricated data for the source-only harness, not real account information.
 
 ## Bounded storage and interruption behavior

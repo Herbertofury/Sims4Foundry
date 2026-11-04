@@ -85,10 +85,12 @@ Only after this evidence is reviewed should a separate single-action test begin.
   uninstalled injected-reader contract; no native adapters, mode source, bootstrap
   or action outcome verifier are qualified.
   [Cross-component budget tests](OBSERVATION_TRANSPORT.md) show that valid maximum
-  reader DTOs can exceed the existing queue's node limit. Integration must define
-  a lossless, bounded complete result and receipt, retain unavailable fields, and
-  refuse whole oversized reads explicitly. Journal receipt digests cannot recover
-  observation bodies. No reader-to-transport route is implemented.
+  standalone reader DTOs can exceed the existing queue's node limit. The separate
+  [request-bound Live path](LIVE_READ_ROUTE.md) uses a smaller whole-read bound,
+  strict structured result/receipt validation and full actor/context intent.
+  It remains uninstalled, default-denied and based on injected readers, with no
+  native adapter, production sender or installed qualification. Build integration
+  remains open. Journal receipt digests cannot recover observation bodies.
 - Reviewed, reversible mod installation/update/rollback on a closed disposable
   profile. Staging currently stops before installation. The read-only
   [resource comparison](RESOURCE_DIFF.md) reports opaque stored-byte and index

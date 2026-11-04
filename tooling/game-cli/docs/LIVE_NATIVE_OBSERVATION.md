@@ -4,8 +4,10 @@
 default-denied readback seam. It observes one explicitly selected actor through
 injected trusted Python readers. It has no game/S4CL imports, service discovery,
 bootstrap, installation, event listeners, scheduler, clock, I/O, dispatch or mode
-changes. It is not wired into transport, CLI/catalog, host fixture validation or
-capability enablement. The existing Build observer is unchanged.
+changes. A separate [request-bound source route](LIVE_READ_ROUTE.md) uses its new
+typed entry point with a smaller whole-read bound. There is no CLI sender, catalog
+capability enablement, installed adapter or conversion to host fixture data.
+The existing Build observer is unchanged.
 
 This is synthetic source coverage, **not installed-game qualification**. Neither
 successful readback nor a `live` declaration permits selection, cancellation,
@@ -17,6 +19,7 @@ mutation, retries or action-completion claims.
 LiveQueueObserver(context_reader, sim_info_reader, instance_reader,
                   admission=None, session_id=None, process_epoch=None)
 observer.observe(request, expected_context, explicit_actor_id)
+observer.observe_request(live_queue_request)
 observer.capabilities()
 ```
 
@@ -36,6 +39,15 @@ observer.capabilities()
   immutable session/PID/creation-FILETIME values. An observer with both binding
   inputs omitted is inert; a partially supplied/invalid binding refuses.
   No reset/rebind exists. Capturing a thread does not prove game scheduler ownership.
+
+`observe_request` accepts only the distinct schema-3 `LiveQueueRequest`. It derives
+actor and full context from that request, passes the complete request to the same
+Live-read admission provider, and permits at most 49 combined rows. The original
+`observe` entry point and its 64-row contract remain unchanged. The source-only
+executor maps explicit row overflow to an unverified/read-unavailable result;
+the observer does not silently trim a successful report. See
+[LIVE_READ_ROUTE.md](LIVE_READ_ROUTE.md) for the exact request, receipt and
+whole-read failure contract.
 
 Before **any** context/actor/instance reader, the **same reviewed host admission
 object used elsewhere** must implement:

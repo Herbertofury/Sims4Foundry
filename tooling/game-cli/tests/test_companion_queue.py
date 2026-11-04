@@ -172,14 +172,18 @@ class QueueLifecycleTests(QueueAssertions):
         self.assertEqual("pending", before.state)
         self.assertEqual(100.0, before.admitted_at)
         self.assertEqual(105.0, before.expires_at)
-        self.assertIs(before, self.queue.status(request().request_id))
+        _snapshot_view = self.queue.status(request().request_id)
+        self.assertEqual(before, _snapshot_view)
+        self.assertIsNot(before, _snapshot_view)
         self.assertIsNone(self.queue.status("0" * 32))
         with self.assertRaises(FrozenInstanceError):
             before.state = "verified"
         final = self.queue.drain(verified)
         self.assertEqual("verified", final.state)
         self.assertEqual("pending", before.state)
-        self.assertIs(final, self.queue.status(request().request_id))
+        _snapshot_view = self.queue.status(request().request_id)
+        self.assertEqual(final, _snapshot_view)
+        self.assertIsNot(final, _snapshot_view)
 
     def test_submit_checks_request_type_and_session(self):
         self.assert_code("invalid_request", self.queue.submit, {})
@@ -201,12 +205,16 @@ class QueueLifecycleTests(QueueAssertions):
     def test_identical_replays_before_and_after_finish_do_not_execute_twice(self):
         req = request()
         first = self.queue.submit(req)
-        self.assertIs(first, self.queue.submit(replace(req)))
+        _snapshot_view = self.queue.submit(replace(req))
+        self.assertEqual(first, _snapshot_view)
+        self.assertIsNot(first, _snapshot_view)
         calls = Mock(side_effect=verified)
         final = self.queue.drain(calls)
         self.clock.now = 1000000
         for _ in range(5):
-            self.assertIs(final, self.queue.submit(req))
+            _snapshot_view = self.queue.submit(req)
+            self.assertEqual(final, _snapshot_view)
+            self.assertIsNot(final, _snapshot_view)
             self.assertIsNone(self.queue.drain(calls))
         self.assertEqual(1, calls.call_count)
 
@@ -230,7 +238,9 @@ class QueueLifecycleTests(QueueAssertions):
         final = self.queue.drain(execute)
         self.assertEqual(("refused", "expired"), (final.state, final.reason))
         execute.assert_not_called()
-        self.assertIs(final, self.queue.submit(req))
+        _snapshot_view = self.queue.submit(req)
+        self.assertEqual(final, _snapshot_view)
+        self.assertIsNot(final, _snapshot_view)
 
     def test_just_before_ttl_can_start_but_expiry_does_not_cancel_started_work(self):
         self.queue.submit(request())
@@ -249,8 +259,12 @@ class QueueLifecycleTests(QueueAssertions):
         first = self.queue.submit(req)
         calls = self.clock.calls
         self.clock.now = 1000
-        self.assertIs(first, self.queue.status(req.request_id))
-        self.assertIs(first, self.queue.submit(req))
+        _snapshot_view = self.queue.status(req.request_id)
+        self.assertEqual(first, _snapshot_view)
+        self.assertIsNot(first, _snapshot_view)
+        _snapshot_view = self.queue.submit(req)
+        self.assertEqual(first, _snapshot_view)
+        self.assertIsNot(first, _snapshot_view)
         self.assertEqual(calls, self.clock.calls)
         self.assertEqual("pending", self.queue.status(req.request_id).state)
         self.assertEqual("expired", self.queue.drain(verified).reason)
@@ -271,7 +285,9 @@ class QueueLifecycleTests(QueueAssertions):
         refused = small.submit(request(2))
         self.assertEqual("pending_full", refused.reason)
         small.drain(verified)
-        self.assertIs(refused, small.submit(request(2)))
+        _snapshot_view = small.submit(request(2))
+        self.assertEqual(refused, _snapshot_view)
+        self.assertIsNot(refused, _snapshot_view)
         self.assertIsNone(small.drain(verified))
         self.assertEqual("pending", small.submit(request(3)).state)
         self.assert_code("request_conflict", small.submit, request(2, ttl_seconds=6))
@@ -292,7 +308,9 @@ class QueueLifecycleTests(QueueAssertions):
         self.clock.now += 100000
         for index in range(129, 300):
             self.assertEqual("history_full", self.queue.submit(request(index)).reason)
-        self.assertIs(oldest, self.queue.submit(request(1)))
+        _snapshot_view = self.queue.submit(request(1))
+        self.assertEqual(oldest, _snapshot_view)
+        self.assertIsNot(oldest, _snapshot_view)
         self.assert_code("request_conflict", self.queue.submit, request(1, ttl_seconds=6))
         self.assertIsNone(self.queue.drain(calls))
         self.assertEqual(128, calls.call_count)
@@ -354,7 +372,9 @@ class ExecutionContractTests(QueueAssertions):
             local = self.make_queue()
             final = local.drain(lambda req: {"outcome": outcome, "mutation_may_have_occurred": True})
             self.assertEqual(outcome, final.state)
-            self.assertIs(final, local.submit(request()))
+            _snapshot_view = local.submit(request())
+            self.assertEqual(final, _snapshot_view)
+            self.assertIsNot(final, _snapshot_view)
             self.assertIsNone(local.drain(verified))
 
     def test_result_is_detached_and_deeply_immutable(self):
@@ -392,7 +412,9 @@ class ExecutionContractTests(QueueAssertions):
                 final = local.drain(execute)
                 self.assertEqual(("unknown", "invalid_execution_result"), (final.state, final.reason))
                 self.assertIsNone(final.result)
-                self.assertIs(final, local.submit(request()))
+                _snapshot_view = local.submit(request())
+                self.assertEqual(final, _snapshot_view)
+                self.assertIsNot(final, _snapshot_view)
                 self.assertIsNone(local.drain(execute))
                 execute.assert_called_once()
 
@@ -401,7 +423,9 @@ class ExecutionContractTests(QueueAssertions):
         final = local.drain(Mock(side_effect=RuntimeError("private diagnostic should not persist")))
         self.assertEqual(("unknown", "execution_exception"), (final.state, final.reason))
         self.assertNotIn("private", repr(final))
-        self.assertIs(final, local.submit(request()))
+        _snapshot_view = local.submit(request())
+        self.assertEqual(final, _snapshot_view)
+        self.assertIsNot(final, _snapshot_view)
         self.assertIsNone(local.drain(verified))
 
     def test_process_control_exceptions_record_unknown_then_propagate(self):
@@ -418,7 +442,9 @@ class ExecutionContractTests(QueueAssertions):
         def execute(req):
             snapshot = local.status(req.request_id)
             self.assertEqual("started", snapshot.state)
-            self.assertIs(snapshot, local.submit(req))
+            _snapshot_view = local.submit(req)
+            self.assertEqual(snapshot, _snapshot_view)
+            self.assertIsNot(snapshot, _snapshot_view)
             self.assert_code("request_conflict", local.submit, replace(req, ttl_seconds=10))
             return verified(req)
         self.assertEqual("verified", local.drain(execute).state)
@@ -488,7 +514,9 @@ class OwnerPreflightTests(QueueAssertions):
             self.assertTrue(worker.is_alive())
         finally:
             release.set(); worker.join(1)
-        self.assertIs(final, self.queue.status(request().request_id))
+        _snapshot_view = self.queue.status(request().request_id)
+        self.assertEqual(final, _snapshot_view)
+        self.assertIsNot(final, _snapshot_view)
         self.assertIsNone(self.queue.drain(native))
         native.assert_not_called()
 
@@ -585,7 +613,8 @@ class ThreadingTests(QueueAssertions):
             self.assertFalse(worker.is_alive())
         self.assertEqual(24, len(outcomes))
         self.assertEqual(1, local.queue_status().retained)
-        self.assertTrue(all(item is outcomes[0] for item in outcomes))
+        self.assertTrue(all(item == outcomes[0] for item in outcomes))
+        self.assertEqual(len(outcomes), len({id(item) for item in outcomes}))
         execute = Mock(side_effect=verified)
         local.drain(execute)
         self.assertIsNone(local.drain(execute))
@@ -675,8 +704,12 @@ class ThreadingTests(QueueAssertions):
         finally:
             release.set()
             worker.join(timeout=3)
-        self.assertIs(final, local.status(request().request_id))
-        self.assertIs(final, local.submit(request()))
+        _snapshot_view = local.status(request().request_id)
+        self.assertEqual(final, _snapshot_view)
+        self.assertIsNot(final, _snapshot_view)
+        _snapshot_view = local.submit(request())
+        self.assertEqual(final, _snapshot_view)
+        self.assertIsNot(final, _snapshot_view)
         self.assertIsNone(local.drain(verified))
 
 

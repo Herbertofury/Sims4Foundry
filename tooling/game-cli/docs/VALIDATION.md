@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 944 tests collected, 930 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 1,043 tests collected, 1,029 passed, 14 Windows-only fixture tests skipped. Optional cross-runtime checks are reported as skipped when their configured reference interpreter is unavailable.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -607,3 +607,76 @@ skips. Recovery-only independent review also passes all 20 cases and three
 no-socket diagnostic probes, including exact exception identity and bounded
 message-free causal inspection. New exact-head CI is required for this combined
 checkpoint; the preceding Windows authentication cause is not claimed resolved.
+
+At resource-diff/recovery-diagnostic head
+ba9e7e5cd23f6715c3ab8cf70aa0f6fdf2951c15, all six Windows/Linux Python
+3.11/3.13/3.14 jobs passed in both push and PR workflows. The Windows 3.11 and
+3.14 PR logs collected all 41 resource-diff and 20 recovery tests:
+40 resource-diff cases passed and the open-file replacement case skipped
+because Windows prevented replacement; 18 recovery cases passed and two optional
+Python 3.7 server cases skipped there. Overall: 944 collected, 11 skips. This clean run does not establish the cause of the
+previous intermittent authentication failure; the stronger fault assertions and
+sanitized context diagnostics remain in place.
+
+The wheel built from the exact matching source tree passes isolated no-site
+smoke tests for the 14-step synthetic workflow, passive journal inspection,
+default native-input refusal, staged fabricated mods, bounded script headers,
+resource update comparison, and unchanged actual Python 3.7 reference headers.
+The uninstalled companion readers are not bundled. Wheel SHA-256:
+9e3395d807c0ef2774ee8acd4d445f144fe78c0e619942d488e046fa88b4a909.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41852658881
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41852665237
+
+## Source-only request-bound Live read checkpoint
+
+The separate schema-3 path connects one explicit actor and complete process,
+zone, household, client, save and generation context through the source reader,
+owner queue, strict result/receipt validation and the client intent journal.
+It introduces no native provider, installed companion, production permission
+policy, CLI live command or schema-3 network sender. The 49-row whole-read bound
+fits the unchanged queue limits; standalone readers keep their existing bounds.
+
+The final local suite collects 1,043 cases: 1,029 pass and 14 Windows-only cases
+skip. A selected queue/Live protocol/reader/executor/route/native/mode aggregate
+runs on actual isolated Python 3.7.17: 248 collected, 238 passed and 10 explicit
+host-only skips. The full current-host suite also runs both optional real
+Python 3.7 recovery servers. Handler-only schema-3 tests use fabricated readers
+and owner ticks with sockets disabled; codec subprocess checks are not network
+or game validation.
+
+The two new cross-runtime fixtures use only the explicitly configured
+`FOUNDRY_COMPANION_PYTHON37`, verify the child is Python 3.7, and disable site
+imports/bytecode writes. No developer-machine path is embedded or inferred.
+The legacy sender compatibility test uses a valid port and explicit fixture
+policy, confirming `invalid_request` for both v3 message types before any socket.
+
+Independent protocol/journal review passed 105 authored cases plus 12 protocol
+and 12 journal probe groups. Its actual Python 3.7 run passed 17 authored cases
+with six host-only skips and 10 independent groups with two host-only skips.
+Shared schema copies remain byte-identical. This review prompted strict attempt
+field checks, class-captured serialization, separate callback views and rejection
+of impossible schema-3 verified summaries during journal replay.
+
+Owner review identified three issues: mutation completion classification,
+retained public snapshot aliases, and legacy read-to-mutation intent changes.
+The implementation now retains original classification and complete primitive
+intent, reconstructs distinct callback views, and deeply detaches public result
+containers. Legacy transport policy views receive the same canonical-baseline
+protection as the new path. Authored regressions and all three saved reviewer
+reproductions pass on current Python and actual Python 3.7.
+
+**The final independent owner/transport re-review is incomplete.** The first two
+fixes were independently reproduced before the third issue was found; the last
+fixes and additional transport changes have ordinary regression/compatibility
+evidence, not a completed final independent assessment. Exact-head hosted CI is
+pending for this checkpoint. No approval, installation or real-game qualification
+follows from these local results.
+
+An isolated no-site wheel smoke test passes the 14-step synthetic workflow,
+new typed Live-read journal admission/receipt/no-replay path, default input
+refusal, fabricated mod staging, resource comparisons and script headers.
+The three actual Python 3.7-compiled reference headers still match. The wheel
+contains no installable companion. It was built from production source at
+cade849f840d6e87065724470268bf2358a80603; subsequent portability corrections
+change only tests and this validation record. Wheel SHA-256:
+83b7b2a3ee5e4b8495c63d9f40ac9b16c8411c83ebce089105555e95060f0920.

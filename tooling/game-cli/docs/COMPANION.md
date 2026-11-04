@@ -16,6 +16,12 @@ Sims profile, connected to a running game, or used to alter a save.
   loopback socket bridge. Server and client default deny without independently
   established host/peer authorization hooks; no such production provider ships.
   See [TRANSPORT.md](TRANSPORT.md) for exact framing and security boundaries.
+- Separate `companion_live_protocol.py`, companion `live_wire.py` and
+  `live_executor.py`: a schema-3 request-bound Live queue read through the existing
+  owner queue and journal, with strict actor/context/result binding and whole-read
+  limits. It uses injected readers only; no native adapter, startup, CLI sender or
+  live qualification is added. Legacy v1/v2 and authentication are unchanged.
+  See [LIVE_READ_ROUTE.md](LIVE_READ_ROUTE.md).
 - `companion-src/foundry_companion/peer_auth.py` and client `companion_auth.py`:
   optional mutual HMAC-SHA256 peer hooks with explicit caller-owned keys, fresh
   nonces, role separation and locally observed socket endpoint binding. No key

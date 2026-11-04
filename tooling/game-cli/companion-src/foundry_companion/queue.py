@@ -22,7 +22,7 @@ limits when an action may START, not how long an already-started action may run.
 """
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 import re
 import threading
@@ -180,6 +180,159 @@ class Request:
 
 
 @dataclass(frozen=True)
+class LiveQueueArguments:
+    actor_sim_id: str
+
+    def __post_init__(self):
+        _check(type(self) is LiveQueueArguments and _decimal_id(self.actor_sim_id), "invalid_arguments",
+               "Live reads require one exact canonical positive uint64 actor ID.")
+
+
+@dataclass(frozen=True)
+class LiveQueueExpectedContext:
+    zone_id: str
+    household_id: str
+    client_id: str
+    save_slot: int
+    save_guid: str
+    zone_generation: int
+    mode: str = 'live'
+
+    def __post_init__(self):
+        _check(type(self) is LiveQueueExpectedContext
+               and all(_decimal_id(value) for value in
+                       (self.zone_id, self.household_id, self.client_id))
+               and type(self.save_slot) is int and 0 <= self.save_slot <= MAX_UINT64
+               and type(self.save_guid) is str
+               and (self.save_guid == '0' or _decimal_id(self.save_guid))
+               and type(self.zone_generation) is int
+               and 1 <= self.zone_generation <= MAX_UINT64
+               and type(self.mode) is str and self.mode == 'live',
+               "invalid_context", "Live reads require complete exact Live context.")
+
+
+@dataclass(frozen=True)
+class LiveQueueRequest:
+    request_id: str
+    session_id: str
+    process_epoch: ProcessEpoch
+    arguments: LiveQueueArguments
+    expected_context: LiveQueueExpectedContext
+    ttl_seconds: float = 5.0
+    operation: str = field(default='live.observe_queue', init=False)
+
+    def __post_init__(self):
+        LiveQueueRequest.validate(self)
+        epoch, args, context = self.process_epoch, self.arguments, self.expected_context
+        object.__setattr__(self, 'process_epoch', ProcessEpoch(epoch.pid, epoch.creation_filetime))
+        object.__setattr__(self, 'arguments', LiveQueueArguments(args.actor_sim_id))
+        object.__setattr__(self, 'expected_context', LiveQueueExpectedContext(
+            context.zone_id, context.household_id, context.client_id, context.save_slot,
+            context.save_guid, context.zone_generation, context.mode))
+
+    def validate(self):
+        _check(type(self) is LiveQueueRequest, "invalid_request", "Expected exact Live request.")
+        _check(_token(self.request_id) and _token(self.session_id), "invalid_id",
+               "Session and request IDs must be 32 lowercase hexadecimal characters.")
+        _check(type(self.operation) is str and self.operation == 'live.observe_queue',
+               "invalid_operation", "Expected the distinct Live read operation.")
+        _check(type(self.process_epoch) is ProcessEpoch, "invalid_epoch", "Expected exact epoch.")
+        ProcessEpoch.__post_init__(self.process_epoch)
+        _check(type(self.arguments) is LiveQueueArguments, "invalid_arguments",
+               "Expected exact Live arguments.")
+        LiveQueueArguments.__post_init__(self.arguments)
+        _check(type(self.expected_context) is LiveQueueExpectedContext, "invalid_context",
+               "Expected exact Live context.")
+        LiveQueueExpectedContext.__post_init__(self.expected_context)
+        _check(type(self.ttl_seconds) in (int, float)
+               and 0 < self.ttl_seconds <= MAX_TTL_SECONDS, "invalid_ttl",
+               "TTL must be finite and greater than zero, at most 30 seconds.")
+
+
+def live_request_key(request):
+    """Private-retention value: every field, including the TTL's numeric kind."""
+    _check(type(request) is LiveQueueRequest, "invalid_request", "Expected exact Live request.")
+    LiveQueueRequest.validate(request)
+    context = request.expected_context
+    return (request.request_id, request.session_id, request.process_epoch.pid,
+            request.process_epoch.creation_filetime, request.arguments.actor_sim_id,
+            context.zone_id, context.household_id, context.client_id, context.save_slot,
+            context.save_guid, context.zone_generation, context.mode, request.operation,
+            request.ttl_seconds, 'int' if type(request.ttl_seconds) is int else 'float')
+
+
+def live_request_from_key(key):
+    """Reconstruct a detached callback view from an internal primitive baseline."""
+    request = LiveQueueRequest(key[0], key[1], ProcessEpoch(key[2], key[3]),
+                              LiveQueueArguments(key[4]),
+                              LiveQueueExpectedContext(*key[5:12]), key[13])
+    _check(live_request_key(request) == key, "invalid_request", "Invalid Live baseline.")
+    return request
+
+
+def _legacy_request_key(request):
+    """Capture every legacy field through fresh exact typed values, never hooks.
+
+    Keep the original legacy dataclass validation/fields unchanged. Constructing
+    a detached value avoids calling instance-shadowed validate, __post_init__ or
+    arguments_dict methods on any caller-owned object.
+    """
+    _check(type(request) is Request, "invalid_request", "Expected an exact legacy request.")
+    operation = request.operation
+    _check(type(operation) is str and operation in _ARGUMENT_TYPES,
+           "invalid_operation", "The operation is not allowlisted.")
+    arguments = request.arguments
+    _check(type(arguments) is _ARGUMENT_TYPES[operation],
+           "invalid_arguments", "Expected exact legacy operation arguments.")
+    argument_value = None
+    if operation == 'live.set_speed':
+        arguments = SetSpeedArguments(arguments.speed)
+        argument_value = arguments.speed
+    elif operation == 'cas.enter':
+        arguments = EnterCasArguments(arguments.sim_id)
+        argument_value = arguments.sim_id
+    else:
+        arguments = _ARGUMENT_TYPES[operation]()
+    epoch = request.process_epoch
+    if epoch is not None:
+        _check(type(epoch) is ProcessEpoch, "invalid_epoch", "Expected exact process epoch.")
+        epoch = ProcessEpoch(epoch.pid, epoch.creation_filetime)
+    copied = Request(request.request_id, request.session_id, operation, arguments,
+                     request.ttl_seconds, request.expected_zone_id, request.expected_household_id,
+                     epoch, request.expected_save_slot, request.expected_save_guid)
+    return (copied.request_id, copied.session_id, operation, argument_value,
+            copied.ttl_seconds, 'int' if type(copied.ttl_seconds) is int else 'float',
+            copied.expected_zone_id, copied.expected_household_id,
+            None if epoch is None else epoch.pid,
+            None if epoch is None else epoch.creation_filetime,
+            copied.expected_save_slot, copied.expected_save_guid)
+
+
+def _legacy_request_from_key(key):
+    operation = key[2]
+    arguments = (_ARGUMENT_TYPES[operation]() if key[3] is None
+                 else _ARGUMENT_TYPES[operation](key[3]))
+    epoch = None if key[8] is None else ProcessEpoch(key[8], key[9])
+    request = Request(key[0], key[1], operation, arguments, key[4], key[6], key[7],
+                      epoch, key[10], key[11])
+    _check(_legacy_request_key(request) == key, "invalid_request", "Invalid legacy baseline.")
+    return request
+
+
+def operation_is_mutation(request):
+    """Only exact known types/operations classify; unknown never means read."""
+    if type(request) is LiveQueueRequest:
+        LiveQueueRequest.validate(request)
+        return False
+    key = _legacy_request_key(request)
+    if key[2] == 'observe':
+        return False
+    _check(key[2] in ('live.set_speed', 'cas.enter', 'game.request_exit_menu'),
+           "invalid_operation", "Unknown operations cannot be classified.")
+    return True
+
+
+@dataclass(frozen=True)
 class Snapshot:
     request_id: str
     session_id: str
@@ -205,8 +358,53 @@ class QueueStatus:
 
 @dataclass
 class _Entry:
-    request: Request
     snapshot: Snapshot
+    # Admission-time classification is a private immutable bool. Never derive
+    # safety latches or later gates from a callback-modifiable request view.
+    mutation: bool
+    legacy_key: object = None
+    live_key: object = None
+
+
+def _snapshot_copy(snapshot):
+    """Detach public views from private retained and deferred-completion state.
+
+    frozen=True cannot stop object.__setattr__. Mapping proxies also expose their
+    backing mapping to reflected comparisons, so even frozen result containers
+    must be copied before they leave the private queue. Only exact scalars share.
+    """
+    return Snapshot(snapshot.request_id, snapshot.session_id, snapshot.state,
+                    snapshot.reason, _copy_frozen_result(snapshot.result), snapshot.admitted_at,
+                    snapshot.expires_at, snapshot.started_at)
+
+
+def _copy_frozen_result(value):
+    # Only private results already validated and frozen by _freeze_result enter
+    # here. Preserve their exact representation without invoking provider hooks.
+    if type(value) is MappingProxyType:
+        return MappingProxyType({name: _copy_frozen_result(child) for name, child in value.items()})
+    if type(value) is tuple:
+        return tuple(_copy_frozen_result(child) for child in value)
+    return value
+
+
+def _entry_request(entry):
+    return (_legacy_request_from_key(entry.legacy_key) if entry.live_key is None
+            else live_request_from_key(entry.live_key))
+
+
+def _entry_view_unchanged(entry, view):
+    return (_legacy_request_key(view) == entry.legacy_key if entry.live_key is None
+            else live_request_key(view) == entry.live_key)
+
+
+def _thaw_result(value):
+    """Only accepts our frozen result containers, never provider conversion hooks."""
+    if type(value) is MappingProxyType:
+        return {name: _thaw_result(child) for name, child in value.items()}
+    if type(value) is tuple:
+        return [_thaw_result(child) for child in value]
+    return value
 
 
 def _freeze_result(result):
@@ -311,7 +509,7 @@ class CompanionQueue:
             request_id, snapshot = self._completed.popleft()
             entry = self._entries[request_id]
             entry.snapshot = snapshot
-            if entry.request.operation != "observe" and snapshot.state in ("unknown", "unverified"):
+            if entry.mutation and snapshot.state in ("unknown", "unverified"):
                 self._mutation_blocked_reason = self._mutation_blocked_reason or "unresolved_mutation"
 
     def _now(self):
@@ -331,8 +529,11 @@ class CompanionQueue:
 
     def submit(self, request):
         """Admit or return the existing snapshot. Never execute or wait as owner."""
-        _check(type(request) is Request, "invalid_request", "A typed Request is required.")
-        request.validate()
+        live_key = live_request_key(request) if type(request) is LiveQueueRequest else None
+        legacy_key = _legacy_request_key(request) if live_key is None else None
+        request = (_legacy_request_from_key(legacy_key) if live_key is None
+                   else live_request_from_key(live_key))
+        mutation = operation_is_mutation(request)
         _check(request.session_id == self._session_id, "session_mismatch",
                "Request belongs to a different session; reconcile rather than replay.")
         self._acquire()
@@ -340,10 +541,10 @@ class CompanionQueue:
             self._apply_completed()
             existing = self._entries.get(request.request_id)
             if existing is not None:
-                if existing.request != request:
+                if existing.live_key != live_key or existing.legacy_key != legacy_key:
                     self._mutation_blocked_reason = self._mutation_blocked_reason or "request_conflict"
                     raise QueueError("request_conflict", "This ID has a different immutable payload.")
-                return existing.snapshot
+                return _snapshot_copy(existing.snapshot)
             if len(self._entries) == self._history_capacity:
                 return Snapshot(request.request_id, self._session_id, "refused", "history_full")
             now = self._now()
@@ -351,17 +552,17 @@ class CompanionQueue:
             _check(math.isfinite(deadline) and deadline > now, "invalid_clock",
                    "Clock precision cannot represent this request's TTL.")
             reason = self._closed_reason
-            if reason is None and request.operation != "observe":
+            if reason is None and mutation:
                 reason = self._mutation_blocked_reason
             if reason is None and len(self._pending) == self._pending_capacity:
                 reason = "pending_full"
             snapshot = Snapshot(request.request_id, self._session_id,
                                 "refused" if reason else "pending", reason,
                                 admitted_at=now, expires_at=deadline)
-            self._entries[request.request_id] = _Entry(request, snapshot)
+            self._entries[request.request_id] = _Entry(snapshot, mutation, legacy_key, live_key)
             if reason is None:
                 self._pending.append(request.request_id)
-            return snapshot
+            return _snapshot_copy(snapshot)
         finally:
             self._lock.release()
 
@@ -372,7 +573,7 @@ class CompanionQueue:
         try:
             self._apply_completed()
             entry = self._entries.get(request_id)
-            return None if entry is None else entry.snapshot
+            return None if entry is None else _snapshot_copy(entry.snapshot)
         finally:
             self._lock.release()
 
@@ -423,7 +624,7 @@ class CompanionQueue:
                 self._apply_completed()
             finally:
                 self._lock.release()
-        return final
+        return _snapshot_copy(final)
 
     def drain(self, execute, admit=None):
         """Consume at most one pending entry and invoke execute at most once.
@@ -454,7 +655,7 @@ class CompanionQueue:
             try:
                 now = self._now()
                 reason = self._closed_reason
-                if reason is None and entry.request.operation != "observe":
+                if reason is None and entry.mutation:
                     reason = self._mutation_blocked_reason
                 if reason is None and now >= old.expires_at:
                     reason = "expired"
@@ -464,13 +665,16 @@ class CompanionQueue:
             if reason is not None:
                 entry.snapshot = Snapshot(request_id, self._session_id, "refused", reason,
                                           admitted_at=old.admitted_at, expires_at=old.expires_at)
-                return entry.snapshot
+                return _snapshot_copy(entry.snapshot)
             self._draining = True
         finally:
             self._lock.release()
 
         try:
-            allowed = admit is None or admit(entry.request) is True
+            view = _entry_request(entry)
+            allowed = admit is None or admit(view) is True
+            if not _entry_view_unchanged(entry, view):
+                allowed = False
         except BaseException as error:
             final = self._finish(request_id, old, "refused", "host_dispatch_denied")
             if not isinstance(error, Exception):
@@ -486,7 +690,7 @@ class CompanionQueue:
             try:
                 now = self._now()
                 reason = self._closed_reason
-                if reason is None and entry.request.operation != "observe":
+                if reason is None and entry.mutation:
                     reason = self._mutation_blocked_reason
                 if reason is None and now >= old.expires_at:
                     reason = "expired"
@@ -507,9 +711,19 @@ class CompanionQueue:
         result = None
         state, reason = "unknown", "execution_exception"
         try:
-            raw = execute(entry.request)
+            view = _entry_request(entry)
+            raw = execute(view)
             try:
-                result = _freeze_result(raw)
+                candidate = _freeze_result(raw)
+                _check(_entry_view_unchanged(entry, view), "invalid_execution_result",
+                       "Execution changed the request view.")
+                if entry.live_key is not None:
+                    # Delayed import keeps queue construction inert and avoids a
+                    # module cycle. Validate the frozen copy against original intent.
+                    from .live_wire import preview_result_receipt
+                    preview_result_receipt(_thaw_result(candidate),
+                                           live_request_from_key(entry.live_key))
+                result = candidate
                 state, reason = result["outcome"], None
             except Exception:
                 state, reason = "unknown", "invalid_execution_result"

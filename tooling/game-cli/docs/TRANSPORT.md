@@ -56,6 +56,15 @@ by itself. Schema 2 is a separate explicit envelope:
   submission, including TTL and every context field, not merely the v1 request.
   It is a consistency check, not a signature or permission token.
 
+A separate [schema-3 Live read route](LIVE_READ_ROUTE.md) adds a flat, exact
+`live.observe_queue` submission with explicit actor and full context. Its parser,
+types and strict result schema are separate from v1/v2. The companion handler
+recognizes the explicit version and retains canonical intent before callbacks;
+legacy parsing and the existing host `exchange_once` sender remain unchanged.
+The latter does not send v3. Source integration tests inject handler calls and
+owner ticks without starting sockets. No installed adapter or production policy
+is supplied, and authentication does not negotiate schema-3 capability.
+
 Each TCP connection carries exactly one four-byte-big-endian-length-prefixed
 UTF-8 JSON object of 1 through 65,536 bytes. The client must half-close its write
 side. The server waits for this EOF before any admission: additional bytes,
@@ -88,6 +97,13 @@ checks without socket/journal I/O or waiting for network workers. Those are
 provider obligations, not capabilities established by these synthetic tests.
 
 ## Owner-thread admission and preserved context
+
+Both supported schemas retain canonical bytes before policy callbacks. Submit
+and dispatch policy stages receive distinct reconstructed submission/binding
+views, with complete intent checked afterward. The queued request is rebuilt
+from the original bytes, never retained from a policy-owned view. Public binding
+values are detached from the original primitive identity. These checks preserve
+supplied-view consistency; trusted Python callbacks are not sandboxed.
 
 The transport preserves PID plus creation epoch, session, exact operation and
 arguments, TTL, zone, household, save slot and save GUID into the immutable queue

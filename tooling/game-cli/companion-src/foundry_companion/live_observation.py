@@ -11,11 +11,19 @@ import threading
 
 from .native import DenyAdmission, NativeRefusal, _capture_binding
 from .queue import (MAX_TTL_SECONDS, MAX_UINT64, ObserveArguments, ProcessEpoch,
-                    Request, _decimal_id, _token)
+                    Request, LiveQueueRequest, live_request_key, live_request_from_key,
+                    _decimal_id, _token)
 
 
 MAX_ROWS = 64
+REQUEST_MAX_ROWS = 49
 MAX_OUTPUT_BYTES = 32 * 1024
+
+
+class _LiveRowLimitExceeded(NativeRefusal):
+    """Fixed request-bound overflow, never an arbitrary provider diagnostic."""
+    def __init__(self):
+        super().__init__('row_limit_exceeded')
 
 
 @dataclass(frozen=True)
@@ -159,6 +167,9 @@ class LiveQueueObserver(object):
         current = threading.current_thread()
         if current is not self._owner_thread or current.ident != self._owner_ident:
             raise NativeRefusal('owner_mismatch')
+        guard = self.__dict__.get('_request_guard')
+        if guard is not None:
+            guard()
 
     def _enter(self):
         self._owned()
@@ -188,6 +199,44 @@ class LiveQueueObserver(object):
         if verdict is not True:
             raise NativeRefusal('live_admission_denied')
         return request_key[0], key
+
+    def _preflight_request(self, request):
+        # Never project the distinct Live operation onto legacy generic observe.
+        try:
+            baseline = live_request_key(request)
+        except Exception:
+            raise NativeRefusal('invalid_live_request') from None
+        key = (baseline[1], baseline[2], baseline[3]) + baseline[5:11]
+        if self._binding is None or key[:3] != self._binding:
+            raise NativeRefusal('binding_mismatch')
+        view = live_request_from_key(baseline)
+        context_view = _context_copy(key)
+
+        def unchanged():
+            valid = False
+            try:
+                valid = (live_request_key(request) == baseline
+                         and live_request_key(view) == baseline
+                         and _context_key(context_view) == key)
+            except Exception:
+                pass
+            if not valid:
+                raise NativeRefusal('live_admission_changed')
+
+        # Every subsequent trusted callback is bracketed by _owned(), so retained
+        # request/context aliases cannot redirect a later reader under old intent.
+        self._request_guard = unchanged
+        failed = False
+        try:
+            verdict = self._admission.require_live_read(view, context_view, baseline[4])
+        except Exception:
+            failed = True
+        self._owned()
+        if failed:
+            raise NativeRefusal('live_admission_unavailable')
+        if verdict is not True:
+            raise NativeRefusal('live_admission_denied')
+        return baseline[0], key, baseline[4]
 
     def _sample(self, key):
         self._owned()
@@ -263,7 +312,7 @@ class LiveQueueObserver(object):
         if error or current is not container:
             raise NativeRefusal('container_changed')
 
-    def _channel(self, sim, name, key, used):
+    def _channel(self, sim, name, key, used, row_limit=MAX_ROWS):
         container, error = self._external(key, getattr, sim, name, kind='field')
         if error or container is None:
             return _channel_unavailable(error or 'null_value'), used
@@ -278,8 +327,10 @@ class LiveQueueObserver(object):
                 break
             if error:
                 raise NativeRefusal('iteration_failed')
-            if used >= MAX_ROWS:
+            if used >= row_limit:
                 # The sole overflow probe must not read any field from this row.
+                if row_limit == REQUEST_MAX_ROWS:
+                    raise _LiveRowLimitExceeded()
                 raise NativeRefusal('row_limit_exceeded')
             used += 1
             rows.append({'index': len(rows),
@@ -288,37 +339,51 @@ class LiveQueueObserver(object):
         self._same_container(sim, name, container, key)
         return {'status': 'observed', 'rows': rows}, used
 
+    def _observe(self, request_id, key, explicit_actor_id, row_limit):
+        self._sample(key)
+        info, sim, reason = self._actor(explicit_actor_id, key)
+        if reason:
+            actor = {'status': 'unavailable', 'reason': reason}
+            queued = _channel_unavailable('actor_unavailable')
+            running = _channel_unavailable('actor_unavailable')
+        else:
+            actor = {'status': 'observed'}
+            queued, used = self._channel(sim, 'queue', key, 0, row_limit)
+            running, used = self._channel(sim, 'si_state', key, used, row_limit)
+            again_info, again_sim, error = self._actor(explicit_actor_id, key)
+            # Retain original references, rather than compare reusable id().
+            if error or again_info is not info or again_sim is not sim:
+                raise NativeRefusal('actor_changed')
+        self._sample(key)
+        result = {'schema_version': 1, 'source': 'source_only_injected_readers',
+                  'source_only': True, 'read_only': True, 'live_qualified': False,
+                  'independent_evidence': False, 'atomic_snapshot': False,
+                  'context_source': 'injected_host_declaration',
+                  'identity_scope': 'this_call_only', 'selection_authority': False,
+                  'cancellation_authority': False, 'action_outcome': 'unknown',
+                  'request_id': request_id, 'context': _context_view(key),
+                  'actor_sim_id': explicit_actor_id, 'actor': actor,
+                  'queued': queued, 'running': running}
+        encoded = json.dumps(result, separators=(',', ':'), allow_nan=False)
+        if len(encoded.encode('utf-8')) > MAX_OUTPUT_BYTES:
+            raise NativeRefusal('output_limit_exceeded')
+        return result
+
     def observe(self, request, expected_context, explicit_actor_id):
+        """Unchanged standalone entry point with its existing 64-row limit."""
         self._enter()
         try:
             request_id, key = self._preflight(request, expected_context, explicit_actor_id)
-            self._sample(key)
-            info, sim, reason = self._actor(explicit_actor_id, key)
-            if reason:
-                actor = {'status': 'unavailable', 'reason': reason}
-                queued = _channel_unavailable('actor_unavailable')
-                running = _channel_unavailable('actor_unavailable')
-            else:
-                actor = {'status': 'observed'}
-                queued, used = self._channel(sim, 'queue', key, 0)
-                running, used = self._channel(sim, 'si_state', key, used)
-                again_info, again_sim, error = self._actor(explicit_actor_id, key)
-                # Retain original references, rather than compare reusable id().
-                if error or again_info is not info or again_sim is not sim:
-                    raise NativeRefusal('actor_changed')
-            self._sample(key)
-            result = {'schema_version': 1, 'source': 'source_only_injected_readers',
-                      'source_only': True, 'read_only': True, 'live_qualified': False,
-                      'independent_evidence': False, 'atomic_snapshot': False,
-                      'context_source': 'injected_host_declaration',
-                      'identity_scope': 'this_call_only', 'selection_authority': False,
-                      'cancellation_authority': False, 'action_outcome': 'unknown',
-                      'request_id': request_id, 'context': _context_view(key),
-                      'actor_sim_id': explicit_actor_id, 'actor': actor,
-                      'queued': queued, 'running': running}
-            encoded = json.dumps(result, separators=(',', ':'), allow_nan=False)
-            if len(encoded.encode('utf-8')) > MAX_OUTPUT_BYTES:
-                raise NativeRefusal('output_limit_exceeded')
-            return result
+            return self._observe(request_id, key, explicit_actor_id, MAX_ROWS)
         finally:
+            self._busy = False
+
+    def observe_request(self, request):
+        """Complete request-bound Live read; fixed 49 rows, no selector knobs."""
+        self._enter()
+        try:
+            request_id, key, actor_id = self._preflight_request(request)
+            return self._observe(request_id, key, actor_id, REQUEST_MAX_ROWS)
+        finally:
+            self.__dict__.pop('_request_guard', None)
             self._busy = False

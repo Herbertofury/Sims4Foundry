@@ -6,7 +6,14 @@ Date: 2026-11-04 UTC.
 
 ## Result
 
-There is a **future integration contract gap**, not a present live integration bug. Neither source observer is wired into queue/transport/CLI. Legitimate maximum source DTOs do not fit the existing queue's structural budget, even though their compact JSON is comfortably below the wire frame limit and the Live source's 32 KiB guard.
+At the audited source, there was a **future integration contract gap**, not a live integration bug: neither source observer was wired into queue/transport/CLI. Legitimate maximum standalone DTOs do not fit the existing queue's structural budget, even though their compact JSON is comfortably below the wire frame limit and the Live source's 32 KiB guard.
+
+The later [request-bound Live path](LIVE_READ_ROUTE.md) uses a separate schema-3
+request, a fixed six-field result and a 49-row whole-read limit. It validates the
+complete frozen result and receipt instead of changing global limits or clipping
+the standalone DTO. This source-only route adds no CLI sender or real-game
+qualification. The measurements below retain their original hypothetical wrapper
+and do not become universal limits for other envelopes or Build integration.
 
 The hypothesis that 64 fully available Live rows might fit is false: the source DTO alone has 1,027 nodes, already above the queue's 1,024-node ceiling. No outcome wrapper can make that unchanged structured DTO fit.
 

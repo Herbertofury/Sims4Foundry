@@ -20,6 +20,7 @@ import stat
 import uuid
 
 from . import companion_protocol as wire
+from . import companion_live_protocol as live
 from .companion_transport import ExpectedContext, ReceiptRead, Submission, parse_receipt
 from .errors import FoundryError
 from .io import external_path, lock, new_json, plain_path, replace_json, sync_directory
@@ -97,6 +98,12 @@ def _read(path):
 
 
 def _submission(value):
+    _require(type(value) is dict and type(value.get("schema")) is int)
+    if value["schema"] == 3:
+        epoch = value.get("process_epoch")
+        _fields(epoch, {"pid", "creation_filetime"})
+        return live.parse_live_submit(value, value.get("session_id"), wire.ProcessEpoch(**epoch))
+    # No version inference or fallback: schema 2 keeps its original exact parser.
     _fields(value, {"schema", "kind", "request", "ttl_seconds", "expected_context"})
     _require(type(value["schema"]) is int and value["schema"] == 2 and value["kind"] == "submit")
     request = value["request"]
@@ -111,11 +118,94 @@ def _submission(value):
     return Submission(request, value["ttl_seconds"], context)
 
 
+def _legacy_submission_wire(message):
+    """Capture legacy primitive fields without invoking instance serializers."""
+    _require(type(message) is Submission and type(message.request) is wire.Request,
+             "invalid_request", "Use an exact supported submission.")
+    request = message.request
+    _require(type(request.process_epoch) is wire.ProcessEpoch
+             and type(request.operation) is wire.Operation,
+             "invalid_request", "Use exact request identity and operation types.")
+    arguments = request.arguments
+    argument_type = wire._ARGUMENT_TYPES[request.operation][0]
+    _require(type(arguments) is argument_type, "invalid_request", "Use exact operation arguments.")
+    context = message.expected_context
+    if context is not None:
+        _require(type(context) is ExpectedContext, "invalid_request", "Use exact mutation context.")
+        context = dict(zone_id=context.zone_id, household_id=context.household_id,
+                       save_slot=context.save_slot, save_guid=context.save_guid)
+    value = dict(schema=2, kind="submit", ttl_seconds=message.ttl_seconds,
+                 expected_context=context,
+                 request=dict(schema=1, kind="request", request_id=request.request_id,
+                              session_id=request.session_id,
+                              process_epoch=dict(pid=request.process_epoch.pid,
+                                                 creation_filetime=request.process_epoch.creation_filetime),
+                              operation=request.operation.value,
+                              arguments=argument_type.to_wire(arguments)))
+    # Construct fresh values through the unchanged v2 parser. No shadowed method
+    # on a callback-owned request, nested value or submission is consulted.
+    return Submission.to_wire(_submission(value))
+
+
+def _message_wire(message):
+    # Class dispatch avoids instance methods replaced with object.__setattr__.
+    kind = type(message)
+    if kind is Submission:
+        return _legacy_submission_wire(message)
+    if kind is ReceiptRead:
+        original = _legacy_submission_wire(message.submission)
+        request = original["request"]
+        return dict(schema=2, kind="receipt_read", request_id=request["request_id"],
+                    session_id=request["session_id"], process_epoch=request["process_epoch"],
+                    request_sha256=hashlib.sha256(wire.encode_frame(original)[4:]).hexdigest())
+    if kind is live.LiveQueueSubmission:
+        return live.LiveQueueSubmission.to_wire(message)
+    if kind is live.LiveQueueReceiptRead:
+        return live.LiveQueueReceiptRead.to_wire(message)
+    _require(False, "invalid_request", "Use an exact supported submission or receipt read.")
+
+
+def _is_submission(message):
+    _require(type(message) in (Submission, ReceiptRead, live.LiveQueueSubmission, live.LiveQueueReceiptRead),
+             "invalid_request", "Use an exact supported submission or receipt read.")
+    return type(message) in (Submission, live.LiveQueueSubmission)
+
+
+def _is_mutation(submission):
+    if type(submission) is live.LiveQueueSubmission:
+        live.LiveQueueSubmission.to_wire(submission)
+        return False
+    _require(type(submission) is Submission and type(submission.request) is wire.Request,
+             "invalid_request", "Use an exact supported submission.")
+    operation = submission.request.operation
+    if operation is wire.Operation.OBSERVE:
+        return False
+    _require(any(operation is allowed for allowed in (wire.Operation.SET_SPEED,
+             wire.Operation.ENTER_CAS, wire.Operation.REQUEST_EXIT_MENU)),
+             "invalid_request", "Unknown operations cannot create read or mutation authority.")
+    return True
+
+
+def _receipt_reader(submission):
+    if type(submission) is live.LiveQueueSubmission:
+        return live.LiveQueueReceiptRead(submission)
+    _require(type(submission) is Submission, "invalid_request", "Use an exact supported submission.")
+    return ReceiptRead(submission)
+
+
+def _parse_receipt(receipt, submission):
+    if type(submission) is live.LiveQueueSubmission:
+        return live.parse_live_receipt(receipt, submission)
+    _require(type(submission) is Submission, "invalid_request", "Use an exact supported submission.")
+    return parse_receipt(receipt, submission)
+
+
 def _freeze(submission):
-    _require(type(submission) is Submission, "invalid_request", "Use an exact typed schema-2 Submission.")
+    _require(type(submission) in (Submission, live.LiveQueueSubmission),
+             "invalid_request", "Use an exact typed schema-2 or schema-3 submission.")
     # Copy through the strict codec: never retain caller-owned values, and never
     # use Python numeric equality to conflate a 5 with a 5.0 TTL/digest.
-    return _submission(wire.decode_payload(_payload(submission.to_wire())))
+    return _submission(wire.decode_payload(_payload(_message_wire(submission))))
 
 
 @dataclass(frozen=True)
@@ -129,9 +219,22 @@ class Attempt:
     kind: str  # submit or receipt_read; only one submit can ever exist
 
     def to_wire(self):
+        _require(type(self) is Attempt and _matches(self.journal_id, _ID)
+                 and _matches(self.request_id, _ID) and _matches(self.request_sha256, _HASH)
+                 and _matches(self.attempt_id, _ID) and _integer(self.sequence, 1, MAX_ATTEMPTS)
+                 and type(self.kind) is str and self.kind in ("submit", "receipt_read"),
+                 "invalid_attempt", "Expected exact immutable attempt fields.")
         return dict(journal_id=self.journal_id, request_id=self.request_id,
                     request_sha256=self.request_sha256, attempt_id=self.attempt_id,
                     sequence=self.sequence, kind=self.kind)
+
+
+def _callback_binding_matches(message, ticket, message_bytes, ticket_bytes):
+    try:
+        return (_payload(_message_wire(message)) == message_bytes
+                and _payload(Attempt.to_wire(ticket)) == ticket_bytes)
+    except (wire.ProtocolError, FoundryError, ValueError, TypeError, KeyError, AttributeError):
+        return False
 
 
 @dataclass(frozen=True)
@@ -150,7 +253,7 @@ def _snapshot(receipt, submission):
     # Parse a detached bounded copy. Arbitrary adapter_result details and raw
     # exceptions are NEVER persisted (they could contain secrets/account data).
     receipt = wire.decode_payload(wire.encode_frame(receipt)[4:])
-    parse_receipt(receipt, submission)
+    _parse_receipt(receipt, submission)
     outcome = receipt["adapter_result"]["outcome"] if receipt["adapter_result"] else None
     reason = receipt["reason"]
     if reason is not None and reason not in _PUBLIC_REASONS:
@@ -211,7 +314,7 @@ class _Entry:
         if self.attempt and not self.answered:
             state = "unknown"
         return Status(self.submission.request.request_id, self.submission.request_sha256,
-                      state, self.submission.request.operation is not wire.Operation.OBSERVE,
+                      state, _is_mutation(self.submission),
                       not self.resolved, "possible" if self.attempt else "not_attempted",
                       self.count, self.attempt.attempt_id if self.attempt else None, self.receipt,
                       self.uncertain or bool(self.attempt and not self.answered))
@@ -310,7 +413,7 @@ class Journal:
                 _require(submission.request.request_id == request_id
                          and submission.request_sha256 == data["request_sha256"])
                 # Global mutation barrier, independent of session/PID/IDs.
-                if submission.request.operation is not wire.Operation.OBSERVE:
+                if _is_mutation(submission):
                     _require(not any(row.status().mutation and not row.resolved for row in entries.values()))
                 entries[request_id] = _Entry(submission, sequence)
             else:
@@ -350,6 +453,8 @@ class Journal:
                         entry.uncertain = True
                     else:
                         snapshot = _parse_snapshot(data["snapshot"])
+                        if type(entry.submission) is live.LiveQueueSubmission:
+                            _require(snapshot.adapter_outcome in (None, "unverified"))
                         _progress(entry, snapshot)
                         entry.receipt = snapshot
                         if snapshot.state in ("unknown", "not_found"):
@@ -380,15 +485,15 @@ class Journal:
         request_id = submission.request.request_id
         if request_id in entries:
             entry = entries[request_id]
-            _require(_payload(entry.submission.to_wire()) == _payload(submission.to_wire()),
+            _require(_payload(_message_wire(entry.submission)) == _payload(_message_wire(submission)),
                      "intent_conflict", "Request ID already binds a different immutable submission.")
             return head, entry, False
         _require(len(entries) < MAX_REQUESTS, "journal_full", "Retained intent limit reached; no eviction or reset is supported.")
-        if submission.request.operation is not wire.Operation.OBSERVE:
+        if _is_mutation(submission):
             _require(not any(row.status().mutation and not row.resolved for row in entries.values()),
                      "mutation_unresolved", "An earlier mutation is unresolved; changing ID/session does not resolve it.")
         head = self._append(head, "intent", request_id,
-                            {"submission": submission.to_wire(), "request_sha256": submission.request_sha256})
+                            {"submission": _message_wire(submission), "request_sha256": submission.request_sha256})
         return head, _Entry(submission, head["sequence"]), True
 
     @staticmethod
@@ -437,38 +542,52 @@ class Journal:
             if entry.resolved:
                 return entry.status()
             self._hooks(authorize, exchange)
-            return self._exchange(head, entry, ReceiptRead(entry.submission), authorize, exchange)
+            return self._exchange(head, entry, _receipt_reader(entry.submission), authorize, exchange)
 
     def _exchange(self, head, entry, message, authorize, exchange):
         _require(entry.count < MAX_ATTEMPTS and head["sequence"] + 2 <= MAX_RECORDS,
                  "journal_full", "Bounded attempt/history capacity exhausted; no reset or replay is supported.")
-        ticket = Attempt(head["journal_id"], entry.submission.request.request_id,
+        kind = "submit" if _is_submission(message) else "receipt_read"
+        original_bytes = _payload(_message_wire(entry.submission))
+        saved_ticket = Attempt(head["journal_id"], entry.submission.request.request_id,
                          entry.submission.request_sha256, uuid.uuid4().hex, entry.count + 1,
-                         "submit" if type(message) is Submission else "receipt_read")
-        message_bytes, ticket_bytes = _payload(message.to_wire()), _payload(ticket.to_wire())
+                         kind)
+        message_bytes = _payload(_message_wire(message))
+        ticket_bytes = _payload(Attempt.to_wire(saved_ticket))
+
+        def detached_message():
+            original = _submission(wire.decode_payload(original_bytes))
+            return original if kind == "submit" else _receipt_reader(original)
+
+        # Admission never receives the retained intent or an exchange-owned view.
+        admission_message = detached_message()
+        admission_ticket = Attempt(**wire.decode_payload(ticket_bytes))
+        _require(_callback_binding_matches(admission_message, admission_ticket, message_bytes, ticket_bytes))
         try:
-            admitted = authorize(message, ticket)
+            admitted = authorize(admission_message, admission_ticket)
         except Exception:
             raise FoundryError("host_admission_failed", "Admission failed; existing intent remains unresolved.") from None
-        _require(_payload(message.to_wire()) == message_bytes and _payload(ticket.to_wire()) == ticket_bytes,
+        _require(_callback_binding_matches(admission_message, admission_ticket, message_bytes, ticket_bytes),
                  "admission_changed", "Trusted admission changed the immutable callback binding.")
-        if admitted is False and type(message) is Submission:
-            self._append(head, "local_refusal", ticket.request_id, {"reason": "host_admission_refused"})
-            return self._load()[1][ticket.request_id].status()
+        if admitted is False and kind == "submit":
+            self._append(head, "local_refusal", saved_ticket.request_id, {"reason": "host_admission_refused"})
+            return self._load()[1][saved_ticket.request_id].status()
         _require(admitted is True, "host_admission_refused", "Trusted host did not admit this exact callback.")
-        saved_ticket = Attempt(**wire.decode_payload(ticket_bytes))
-        head = self._append(head, "attempt", saved_ticket.request_id, saved_ticket.to_wire())
+        # Retained admission aliases cannot redirect these fresh callback views.
+        exchange_message = detached_message()
+        exchange_ticket = Attempt(**wire.decode_payload(ticket_bytes))
+        head = self._append(head, "attempt", saved_ticket.request_id, Attempt.to_wire(saved_ticket))
         # An exception/crash from here forward is possible transmission, even if
         # no bytes were actually sent. No later refusal may clear uncertainty.
         try:
-            receipt = exchange(message, ticket)
+            receipt = exchange(exchange_message, exchange_ticket)
         except Exception:
             self._append(head, "exchange_failed", saved_ticket.request_id,
                          {"attempt_id": saved_ticket.attempt_id, "attempt_sequence": saved_ticket.sequence,
                           "reason": "callback_failed"})
             raise FoundryError("exchange_uncertain", "Callback failed; only receipt reads are allowed.") from None
         try:
-            _require(_payload(message.to_wire()) == message_bytes and _payload(ticket.to_wire()) == ticket_bytes)
+            _require(_callback_binding_matches(exchange_message, exchange_ticket, message_bytes, ticket_bytes))
             # Evaluate against the reloaded attempt chronology, including an
             # unanswered earlier attempt after a process restart.
             current = self._load()[1][saved_ticket.request_id]

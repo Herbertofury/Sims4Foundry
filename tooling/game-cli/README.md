@@ -42,8 +42,11 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
 - An uninstalled, default-denied Live queue reader seam for one explicit actor,
   tested only with injected fabricated readers and bounded sequential iteration.
 - Cross-component observation-budget regressions covering the queue, both wire
-  codecs and digest-only journal. The source readers are not transport adapters;
-  their maximum snapshots do not always fit the queue's structural limits.
+  codecs and digest-only journal. Maximum standalone reader snapshots do not
+  always fit the queue's structural limits.
+- A separate source-only Live read request path, binding one explicit actor and
+  full context through the owner queue, strict receipt schema and intent journal.
+  It uses a whole-read bound and remains uninstalled and default-denied.
 - Windows-only process/window identity inspection and pinned FFmpeg WGC capture
   implementations. Their native paths still need controlled Windows/game validation.
 
@@ -59,8 +62,9 @@ The existing Apex CLI is a distinct, Apex-dependent controller. Its successful
 background clicks are not proof that no-Apex Windows messages work. See
 [Migration evidence](docs/MIGRATION.md) and [qualification gates](docs/QUALIFICATION.md).
 The [observation transport contract](docs/OBSERVATION_TRANSPORT.md) records the
-remaining envelope, lossless-field and result-retention requirements before any
-Build or Live reader can be integrated with the companion transport.
+envelope, lossless-field and result-retention constraints. The separate
+[request-bound Live read](docs/LIVE_READ_ROUTE.md) addresses one source-only path;
+it introduces no game adapter, native input or CLI network sender.
 
 ## Install and test
 
@@ -291,7 +295,10 @@ data only. It preserves exact decimal-string IDs, unknown outcomes and separate
 queued/running availability without native reads, events or CLI integration.
 A separate [source-only Live reader](docs/LIVE_NATIVE_OBSERVATION.md) preserves
 unavailable fields while sampling one admitted actor's queued/running occurrences.
-It has no targets, labels, dispatch, transport route or durable selection handles.
+It has no targets, labels, native action dispatch or durable selection handles.
+The [request-bound Live route](docs/LIVE_READ_ROUTE.md) uses a separate strict
+schema and smaller whole-read limit through the owner queue and journal. It has
+no installed adapter or CLI network sender.
 Exact mode and context come from trusted injected adapters; neither this seam nor
 fixture validation qualifies those adapters or establishes a real game outcome.
 

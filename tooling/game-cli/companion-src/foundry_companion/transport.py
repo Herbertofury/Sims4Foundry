@@ -23,9 +23,10 @@ import threading
 from time import monotonic
 
 from .queue import (CompanionQueue, ProcessEpoch, QueueError,
-                    Snapshot, MAX_HISTORY, MAX_PENDING)
+                    Snapshot, MAX_HISTORY, MAX_PENDING, operation_is_mutation,
+                    _legacy_request_key)
 from .wire import (MAX_FRAME_BYTES, ProtocolError, decode_payload, encode_frame,
-                   parse_submit, parse_receipt_read, receipt)
+                   parse_submit, parse_receipt_read, receipt, Submission)
 
 MAX_CONNECTIONS = 8
 MAX_CONNECTION_SECONDS = 5.0
@@ -115,6 +116,8 @@ def _send_one(connection, value, deadline):
 class _Record:
     submission: object
     refusal: object = None
+    schema: int = 2
+    canonical_payload: object = None
 
 
 class LoopbackTransport:
@@ -131,14 +134,14 @@ class LoopbackTransport:
                  history_capacity=MAX_HISTORY, max_connections=4, connection_seconds=2.0):
         if type(process_epoch) is not ProcessEpoch:
             raise QueueError("invalid_epoch", "A typed process epoch is required.")
-        process_epoch.__post_init__()
+        ProcessEpoch.__post_init__(process_epoch)
         if type(max_connections) is not int or not 1 <= max_connections <= MAX_CONNECTIONS:
             raise QueueError("invalid_capacity", "Connections must be between one and eight.")
         if (type(connection_seconds) not in (int, float)
                 or not 0 < connection_seconds <= MAX_CONNECTION_SECONDS):
             raise QueueError("invalid_timeout", "Connection deadline must be positive, at most five seconds.")
         self._queue = CompanionQueue(session_id, pending_capacity, history_capacity)
-        self._binding = Binding(session_id, process_epoch)
+        self._binding_key = (session_id, process_epoch.pid, process_epoch.creation_filetime)
         self._policy = policy if policy is not None else DenyHostPolicy()
         self._capacity = history_capacity
         self._max_connections = max_connections
@@ -158,7 +161,7 @@ class LoopbackTransport:
 
     @property
     def binding(self):
-        return self._binding
+        return self._binding_copy()
 
     @property
     def address(self):
@@ -167,6 +170,47 @@ class LoopbackTransport:
 
     def queue_status(self):
         return self._queue.queue_status()
+
+    def _binding_copy(self):
+        key = self._binding_key
+        return Binding(key[0], ProcessEpoch(key[1], key[2]))
+
+    def _submission_copy(self, payload, schema):
+        binding = self._binding_copy()
+        parser = parse_submit
+        if schema == 3:
+            from . import live_wire
+            parser = live_wire.parse_submit
+        return parser(decode_payload(payload), binding.session_id, binding.process_epoch)
+
+    def _request_matches(self, request, payload, schema):
+        if schema == 3:
+            from . import live_wire
+            return live_wire.canonical_payload(request) == payload
+        original = self._submission_copy(payload, schema).request
+        return _legacy_request_key(request) == _legacy_request_key(original)
+
+    def _submission_view_matches(self, submission, binding, payload, digest, schema):
+        expected_type = Submission
+        if schema == 3:
+            from . import live_wire
+            expected_type = live_wire.Submission
+        try:
+            return (type(submission) is expected_type
+                    and type(submission.canonical_payload) is bytes
+                    and submission.canonical_payload == payload
+                    and type(submission.request_sha256) is str
+                    and submission.request_sha256 == digest
+                    and self._request_matches(submission.request, payload, schema)
+                    and type(binding) is Binding
+                    and type(binding.process_epoch) is ProcessEpoch
+                    and type(binding.session_id) is str
+                    and type(binding.process_epoch.pid) is int
+                    and type(binding.process_epoch.creation_filetime) is int
+                    and (binding.session_id, binding.process_epoch.pid,
+                         binding.process_epoch.creation_filetime) == self._binding_key)
+        except Exception:
+            return False
 
     def owner_tick(self, execute):
         """One queue item per owner tick; native work only through this callback."""
@@ -180,8 +224,16 @@ class LoopbackTransport:
             # Immutable records are published before queue submission and never
             # removed. No network lock is needed to read this entry.
             record = self._records[request.request_id]
-            return (self._policy.authorize_dispatch(record.submission, self.binding) is True
-                    and not self._stop.is_set())
+            payload = record.canonical_payload
+            if not self._request_matches(request, payload, record.schema):
+                return False
+            view = self._submission_copy(payload, record.schema)
+            binding = self._binding_copy()
+            digest = view.request_sha256
+            allowed = self._policy.authorize_dispatch(view, binding) is True
+            return (allowed and not self._stop.is_set()
+                    and self._submission_view_matches(view, binding, payload, digest, record.schema)
+                    and self._request_matches(request, payload, record.schema))
         def dispatch(request):
             if self._stop.is_set():
                 # Started is already published: no exception can imply refusal.
@@ -331,52 +383,71 @@ class LoopbackTransport:
         _remaining(deadline)
         if self._stop.is_set():
             raise ProtocolError("transport_shutdown", "Transport is permanently closed.")
-        session, epoch = self.binding.session_id, self.binding.process_epoch
+        # Schema 3 is explicit, never inferred from an operation or retried as v2.
+        schema = 3 if type(value.get('schema')) is int and value['schema'] == 3 else 2
+        submit_parser, read_parser, make_receipt = parse_submit, parse_receipt_read, receipt
+        binding = self._binding_copy()
+        session, epoch = binding.session_id, binding.process_epoch
+        if schema == 3:
+            from . import live_wire
+            submit_parser, read_parser, make_receipt = (live_wire.parse_submit,
+                live_wire.parse_receipt_read, live_wire.receipt)
         if value.get("kind") == "receipt_read":
-            request_id, digest = parse_receipt_read(value, session, epoch)
+            request_id, digest = read_parser(value, session, epoch)
             _remaining(deadline)
             record = self._records.get(request_id)
             if record is None:
                 self._queue.block_mutations("history_missing")
-                return receipt(request_id, digest, session, epoch), False
-            if record.submission.request_sha256 != digest:
+                return make_receipt(request_id, digest, session, epoch), False
+            retained = self._submission_copy(record.canonical_payload, record.schema)
+            if record.schema != schema or retained.request_sha256 != digest:
                 self._queue.block_mutations("request_conflict")
                 raise ProtocolError("request_conflict", "Receipt does not match retained intent.")
             snapshot = record.refusal or self._queue.status(request_id)
-            return receipt(request_id, digest, session, epoch, snapshot), snapshot.state != "refused"
-        submission = parse_submit(value, session, epoch)
+            return make_receipt(request_id, digest, session, epoch, snapshot), snapshot.state != "refused"
+        submission = submit_parser(value, session, epoch)
         _remaining(deadline)
         request, digest = submission.request, submission.request_sha256
+        # Independent immutable bytes, captured before a provider sees any view.
+        payload = submission.canonical_payload
         request_id = request.request_id
         record = self._records.get(request_id)
         if record is not None:
-            if record.submission.canonical_payload != submission.canonical_payload:
+            retained_payload = record.canonical_payload
+            if record.schema != schema or retained_payload != payload:
                 self._queue.block_mutations("request_conflict")
                 raise ProtocolError("request_conflict", "ID already binds different immutable intent.")
             snapshot = record.refusal or self._queue.status(request_id)
-            return receipt(request_id, digest, session, epoch, snapshot), snapshot.state != "refused"
+            return make_receipt(request_id, digest, session, epoch, snapshot), snapshot.state != "refused"
         if len(self._records) == self._capacity:
             snapshot = Snapshot(request_id, session, "refused", "history_full")
-            return receipt(request_id, digest, session, epoch, snapshot), False
+            return make_receipt(request_id, digest, session, epoch, snapshot), False
         # New, authenticated submissions alone may create an entry. Hooks must
         # perform bounded non-native work and durably record authorized intent.
         status = self._queue.queue_status()
         reason = status.closed_reason
-        if reason is None and request.operation != "observe":
+        if reason is None and operation_is_mutation(request):
             reason = status.mutation_blocked_reason
         try:
-            if reason is None and self._policy.authorize_submit(submission, self.binding, deadline) is not True:
-                reason = "host_admission_denied"
+            if reason is None:
+                view, binding = self._submission_copy(payload, schema), self._binding_copy()
+                allowed = self._policy.authorize_submit(view, binding, deadline) is True
+                if not allowed or not self._submission_view_matches(view, binding, payload, digest, schema):
+                    reason = "host_admission_denied"
             _remaining(deadline)
             if self._stop.is_set():
                 reason = "transport_shutdown"
         except Exception:
             reason = reason or "host_admission_denied"
+        # Never admit a callback-owned request, even when its current bytes
+        # compare equal. Later retained alias mutation cannot change intent.
+        submission = self._submission_copy(payload, schema)
+        request = submission.request
         if reason is not None:
             snapshot = Snapshot(request_id, session, "refused", reason)
-            self._records[request_id] = _Record(submission, snapshot)
-            return receipt(request_id, digest, session, epoch, snapshot), False
-        self._records[request_id] = _Record(submission)
+            self._records[request_id] = _Record(submission, snapshot, schema, payload)
+            return make_receipt(request_id, digest, session, epoch, snapshot), False
+        self._records[request_id] = _Record(submission, schema=schema, canonical_payload=payload)
         try:
             snapshot = self._queue.submit(request)
         except BaseException:
@@ -385,10 +456,10 @@ class LoopbackTransport:
             snapshot = self._queue.status(request_id)
             if snapshot is None:
                 snapshot = Snapshot(request_id, session, "refused", "queue_admission_failed")
-                self._records[request_id] = _Record(submission, snapshot)
+                self._records[request_id] = _Record(submission, snapshot, schema, payload)
             self._queue.block_mutations("admission_uncertain")
             raise
-        return receipt(request_id, digest, session, epoch, snapshot), snapshot.state != "refused"
+        return make_receipt(request_id, digest, session, epoch, snapshot), snapshot.state != "refused"
 
     def shutdown(self, timeout=2.0):
         """Close sockets and latch dispatch off. Never discard or reset receipts.
