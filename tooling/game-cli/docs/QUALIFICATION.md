@@ -20,6 +20,7 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | WGC capture | Pinned helper implementation | Mock helper plus real PNG validation | Pending current game test |
 | No-Apex click/key/scroll/drag | Pure packet plans, injected runner and source-only native backend with always-denied public entry | Native backend click/key/wheel/drag packet receipts and unchanged cursor/foreground on disposable Windows fixtures | No |
 | Foundry semantic game bridge | Uninstalled typed queue, narrow native bindings, default-denied socket transport and explicit-key peer hooks; no bootstrap/admitted host | Fabricated services and real isolated sockets on actual Python 3.7 | No |
+| Build object/mode observation | Uninstalled, separately admitted explicit-ID reader and transition-observation seam | Injected fabricated readers on current Python and actual Python 3.7 | No atomic/native/world-state proof |
 | No-Apex launch/entry/save/load/exit | Launch metadata preparation only | Synthetic EA metadata tests | No |
 
 ## Required controlled validation
@@ -71,6 +72,10 @@ Only after this evidence is reviewed should a separate single-action test begin.
 - Integrate the cooperative process-lifetime lease with a shared durable journal and detect nonparticipating user/Apex/other-tool interference. A lease alone does not authorize input.
 - Windows crash-durable pre-dispatch evidence ordering.
 - Semantic state readers and independently checkable predicates for all domains.
+  The [Build observation seam](BUILD_OBSERVATION.md) is a bounded source-only
+  starting point, not a qualified reader. The [Live interaction source review](LIVE_INTERACTION_RESEARCH.md)
+  separates tuning IDs from queue occurrences and pre-call events from completion;
+  native queue observation, instance correlation and action outcomes remain open.
 - Reviewed, reversible mod installation/update/rollback on a closed disposable
   profile. Staging currently stops before installation.
 - Coverage expansion beyond the initial operation catalog, driven by real tasks.

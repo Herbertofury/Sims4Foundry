@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 674 tests collected, 660 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 722 tests collected, 708 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -337,3 +337,36 @@ checks. A fourth Windows-only test checks real stat/fstat for tiny fabricated
 executable-named files without executing them. Independent review, 31 passing
 local launch tests and the combined local suite above pass; the new native test
 skips on Linux. Exact-head Windows CI must confirm the correction.
+
+At corrected launch head 9e5cc019da44c577e687c4d9763a653fa93083a6, both push
+and pull-request workflows passed all four Windows/Linux Python 3.11/3.13 jobs.
+Both Windows logs explicitly passed the new native stat/fstat diagnostic and
+the three portable regressions: 674 collected, 665 passed, 9 skipped on each.
+No executable-named fixture file was executed. The exact-source wheel also
+passed an isolated no-site import, the synthetic 14-step workflow, passive
+journal status, default input denial, fabricated mod staging and exact-byte
+launch-metadata preparation. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41828121473
+
+The uninstalled Build observation seam adds 48 tests, all passing on current
+Python and actual isolated Python 3.7.17. The 45 earlier native-binding tests also
+pass on both interpreters. It samples at most 32 explicit object IDs through
+injected fabricated readers, with owner-thread/reentrancy checks, captured
+session/process binding and exact host-declared zone/save context around reads.
+The same host admission provider must explicitly approve detached Build context
+and object selection; generic status-read admission cannot expand into Build.
+
+Review prompted static callback-error redaction, narrower admission scope and
+explicit request-bound, non-atomic snapshot labeling. Missing fields, invalid
+quaternions/surfaces, object disappearance/reuse and mode changes stay unavailable
+rather than becoming default values. Transition history has bounded retention and
+never supplies current mode. No native objects survive between calls. Final
+independent review and the combined suite above pass; exact-head hosted CI is
+pending. No game imports, bootstrap, hooks, mutation or transport route were added.
+See [BUILD_OBSERVATION.md](BUILD_OBSERVATION.md) for all retained limits.
+
+[Live interaction source research](LIVE_INTERACTION_RESEARCH.md) records pinned
+public-source identity and outcome caveats. It introduces no adapter or dispatch
+support: tuning GUIDs are not queue-instance IDs, unavailable readers are not
+empty-state proof, and enqueue/cancel returns or pre-call events are not verified
+completion. Current installed-game behavior remains untested.

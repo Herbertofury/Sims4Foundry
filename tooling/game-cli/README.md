@@ -30,6 +30,8 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
   loopback transport, exercised with fabricated services rather than a game.
 - A restart-safe companion intent/receipt journal and read-only local history
   inspection. Unknown mutations cannot be retried or cleared through the CLI.
+- An uninstalled, default-denied Build observation seam for explicit object IDs
+  and transition notifications, tested only with injected fabricated readers.
 - Windows-only process/window identity inspection and pinned FFmpeg WGC capture
   implementations. Their native paths still need controlled Windows/game validation.
 
@@ -225,6 +227,15 @@ Windows process lease bypasses live qualification or resolves earlier actions.
 See [PEER_AUTH.md](docs/PEER_AUTH.md) for the key-possession proof, exact socket
 binding and remaining security limits. It is not encrypted application transport
 or proof that a socket belongs to the game.
+
+[Build observation](docs/BUILD_OBSERVATION.md) supplies a separately scoped,
+owner-thread read contract. It distinguishes missing fields, non-atomic object
+samples, current mode and event history without adding game hooks or transport
+commands. Generic status-read permission does not admit these expanded reads.
+[Live interaction source research](docs/LIVE_INTERACTION_RESEARCH.md) records why
+tuning IDs, enqueue results, bulk cancellation returns and pre-call events are
+not sufficient evidence of exact interaction identity or completion. Neither
+addition enables real Build or Live actions.
 
 ## Passive process discovery
 
