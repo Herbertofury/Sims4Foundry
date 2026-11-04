@@ -59,7 +59,9 @@ def safe_relative(value):
     for part in value.split("/"):
         if (not part or part in (".", "..") or part.endswith((".", " "))
                 or any(ord(c) < 32 or c in '<>"|?*' for c in part)
-                or part.split(".", 1)[0].casefold() in reserved):
+                # Windows also treats "NUL .json" as a device name. Spaces
+                # before the first extension do not make a reserved stem safe.
+                or part.split(".", 1)[0].rstrip(" ").casefold() in reserved):
             return False
     return True
 

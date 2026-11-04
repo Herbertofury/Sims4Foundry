@@ -33,6 +33,15 @@ def parser():
     companion_build.add_argument("--python37", required=True, help="Explicit trusted Python 3.7 compiler executable")
     companion_build.add_argument("--compiler-sha256", required=True, help="Expected lowercase SHA-256 of that executable")
     companion_build.add_argument("--manifest-output", help="Optional new external manifest path")
+    probe_build = commands.add_parser("startup-probe-build", help="Build a separate credential-free loader diagnostic; never install or run it")
+    probe_build.add_argument("--source", required=True, help="Explicit Foundry diagnostic-src directory")
+    probe_build.add_argument("--output", required=True, help="New external .ts4script path")
+    probe_build.add_argument("--python37", required=True)
+    probe_build.add_argument("--compiler-sha256", required=True)
+    probe_build.add_argument("--run-id", required=True, help="32 lowercase hex characters for this proposed diagnostic run")
+    probe_build.add_argument("--probe-output", required=True, help="Explicit new Windows external .json evidence filename for a later authorized run")
+    probe_build.add_argument("--seconds", type=float, default=30.0)
+    probe_build.add_argument("--manifest-output")
     for domain in ("game", "cas", "live", "build"):
         semantic = commands.add_parser(domain, help="Plan a typed operation (does not execute it)")
         semantic.add_argument("action", choices=[key.split(".", 1)[1] for key in CATALOG if key.startswith(domain + ".")])
@@ -113,6 +122,11 @@ def run(args):
         from .companion_build import build_companion
         return build_companion(args.source, args.output, args.python37,
                                args.compiler_sha256, args.manifest_output)
+    if args.command == "startup-probe-build":
+        from .startup_probe_build import build_startup_probe
+        return build_startup_probe(args.source, args.output, args.python37, args.compiler_sha256,
+                                  run_id=args.run_id, probe_output=args.probe_output,
+                                  wait_seconds=args.seconds, manifest_output=args.manifest_output)
     if args.command == "session":
         if args.action == "create":
             return create_session(args.directory, args.backend)

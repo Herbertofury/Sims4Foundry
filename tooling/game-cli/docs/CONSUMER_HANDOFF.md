@@ -65,6 +65,18 @@ owner-runtime integration is present; automatic startup, production admission,
 key provisioning and real-game checks are still separate work. See
 [COMPANION_BUILD.md](COMPANION_BUILD.md) and [OWNER_RUNTIME.md](OWNER_RUNTIME.md).
 
+`startup-probe-build` separately packages a credential-free loader/thread
+diagnostic for a later authorized disposable-profile run. It does not install or
+run it, and does not turn on companion control. The next qualification step is
+to establish Foundry's actual loader entry and startup/tick relationship without
+Apex. See [STARTUP_PROBE_BUILD.md](STARTUP_PROBE_BUILD.md).
+
+Host integration also has a bounded Windows connected-socket ownership observer.
+It matches the server-side established loopback four-tuple to an independently
+retained target process, instead of treating an HMAC key or port as PID proof.
+This is a library primitive, not a new live-send CLI switch. See
+[LOOPBACK_OWNER.md](LOOPBACK_OWNER.md).
+
 ## Historical source evidence for the standalone port
 
 The supplied control handoff and source review established these paths:

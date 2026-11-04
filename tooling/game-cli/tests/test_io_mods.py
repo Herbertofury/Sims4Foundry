@@ -82,6 +82,7 @@ class IOTests(unittest.TestCase):
 
     def test_windows_relative_names(self):
         for name in ("CON.package", "nul.ts4script", "COM1.package", "COM¹.package", "LPT².package", "folder./a.package", "folder /a.package",
+                     "NUL .json", "CON   .package", "folder/COM1 .ts4script", "LPT1 .json",
                      "a\x00.package", "a?/b.package", "C:/a.package", "../a.package", "a\\b.package", "a//b.package"):
             with self.subTest(name=name):
                 self.assertFalse(safe_relative(name))

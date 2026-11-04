@@ -789,3 +789,48 @@ fixtures skipped. Actual isolated Python 3.7 was explicitly configured. The
 separate final path-propagation review passed 23 checks with one native Windows
 skip and confirmed unchanged source hashes; it did not review native dispatch or
 the earlier owner/transport boundaries.
+
+At standalone head c8df9eb972f8f092be9018d5f58eb7ccacd7e260, all six matrix jobs
+passed in both workflows. Windows 3.11 and 3.14 PR logs confirm that the newly
+owned Python-child exit-monitor fixture ran and passed, rather than being
+skipped. The installed no-site wheel also built the same neutral archive bytes
+and passed the existing 14-step synthetic/offline packaging checks. This is not
+a real-game exit test and does not complete the earlier denied independent
+owner/transport re-review.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41876690782
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41876700941
+
+## Credential-free startup probe and connected process binding
+
+The new separate diagnostic runtime passes 49 fabricated-module/owned-thread
+tests on both current Python 3.12 and actual isolated CPython 3.7.17. Independent
+review found and verified fixes for a late Thread.start exception resource race
+and a non-BMP Unicode evidence-size overflow. Explicit atomic resource ownership
+now prevents the startup caller from closing a running writer's pinned directory
+handle. Encoded loader-field budgets preserve the 16-KiB publication bound and
+truthful truncation flags. A known-positive original tick frame refuses startup
+before path metadata I/O, hook installation or thread creation. The absence of
+that frame is still unknown, not proof that startup is outside a tick.
+
+The separate fixed-entry archive builder passes 16 cloud-only tests, including
+actual Python 3.7 compilation without running the diagnostic source. Its scoped
+independent review found and verified a Windows reserved-device alias fix in the
+shared relative-name validator, such as `NUL .json`. Source, tests and docs contain
+no actual game/account data, keys, or required Apex runtime. No diagnostic has
+been installed or run in a game. Windows path race limitations and self-report
+limits remain explicit.
+
+The connected-loopback ownership primitive passes 36 fabricated tests with one
+owned GitHub-hosted Windows test skipped locally. Scoped independent review
+verified the Microsoft ABI, tuple orientation, bounded error/denial behavior,
+and buffer wiping; additional randomized malformed-table and port-decoding probes
+passed. The hosted fixture is enabled only for a newly owned Windows runner and
+does not contact a game or user's desktop. Its native result remains pending.
+These new feature reviews do not replace the earlier incomplete independent
+owner/transport re-review or qualify live game control.
+
+The frozen startup checkpoint's complete local suite collected 1,282 tests:
+1,266 passed and 16 Windows-only fixtures skipped, with the trusted Python 3.7
+compiler explicitly configured. The actual separate diagnostic archive built
+from that checkpoint has six members and 43,073 bytes. Its fixture-only output
+configuration is not an installation instruction; no archive was deployed.
