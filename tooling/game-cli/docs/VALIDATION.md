@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 635 tests collected, 622 passed, 13 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 650 tests collected, 637 passed, 13 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -268,3 +268,31 @@ interrupted copies, no-overwrite receipts, symlinks, ZIP CRC and cumulative boun
 Independent review and the local suite above pass; Windows-specific filesystem
 behavior still requires exact-head CI. No game/profile installation or access
 was used.
+
+At offline staging head e1df93f28fb14b1ed042d2bf1570c4894ce6453d, all four
+Windows/Linux Python 3.11/3.13 jobs passed in both push and pull-request
+workflows. The exact-source wheel also passed a clean no-site import, the
+synthetic workflow, passive journal status, default native denial and external
+staging of a fabricated package. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41823502980
+
+The follow-on audit found eager recursive sorting could scan unbounded irrelevant
+entries before enforcing artifact limits. Inventory now uses non-following
+directory-entry inspection, rejecting observed links/reparse points before
+descent, with 16,384 total entries, 32 nested directory levels and 4,096 artifacts
+as explicit caps. One overflow entry may be fetched to detect the bound, but is
+not inspected or descended into. Directory handles close before opening another;
+only bounded collected artifact rows are sorted. This does not make a changing
+or hostile filesystem safe.
+
+Manifest depth and UTF-16 length limits are checked before constructing ancestor
+prefixes. Output paths for artifacts and both receipts, including their temporary
+filenames and empty manifests, are limited to 259 UTF-16 units overall; created
+directory paths are capped at 247. Components are limited to both 255 UTF-16 units
+and 255 UTF-8 bytes before source I/O or directory creation. Fifteen additional
+tiny-fixture regressions cover traversal, resource bounds, links, deterministic
+output, path depth, exact accepted limits and output length. Independent review
+reproduced and prompted fixes for temporary receipt overhead and multibyte POSIX
+component limits.
+These limits apply to offline mod inventory/staging, not ZIP member names or the
+shared path helpers. Exact-head Windows CI remains required for this update.

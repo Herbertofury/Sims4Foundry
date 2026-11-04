@@ -6,6 +6,7 @@ compatibility, or installation into a game profile.
 """
 
 import copy
+from contextlib import contextmanager
 import hashlib
 import io
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 import stat
 import struct
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 import zipfile
@@ -56,11 +58,187 @@ class ModUpdateAdversarialTests(unittest.TestCase):
     def assert_sources_unchanged(self):
         self.assertEqual(self.original, {path: path.read_bytes() for path in self.source.iterdir()})
 
+    @staticmethod
+    def tracked_scanner():
+        real_scandir = os.scandir
+        events = {name: [] for name in ("opened", "yielded", "statted", "closed")}
+
+        class Entry:
+            def __init__(self, original):
+                self.original = original
+                self.path = original.path
+                events["yielded"].append(Path(self.path))
+
+            def stat(self, *, follow_symlinks):
+                if follow_symlinks:
+                    raise AssertionError("inventory must not follow entries")
+                events["statted"].append(Path(self.path))
+                return self.original.stat(follow_symlinks=False)
+
+        @contextmanager
+        def scanner(path):
+            events["opened"].append(Path(path))
+            try:
+                with real_scandir(path) as entries:
+                    yield (Entry(entry) for entry in entries)
+            finally:
+                events["closed"].append(Path(path))
+
+        return scanner, events
+
+    def test_inventory_bounds_irrelevant_entries_before_materializing_scan(self):
+        source = self.root / "irrelevant"
+        source.mkdir()
+        before = {}
+        for n in range(5):
+            path = source / ("ignored%d.txt" % n)
+            path.write_bytes(b"fabricated irrelevant file")
+            before[path] = path.read_bytes()
+        scanner, events = self.tracked_scanner()
+        with mock.patch.object(mods, "MAX_SCAN_ENTRIES", 2), \
+                mock.patch.object(mods.os, "scandir", side_effect=scanner), \
+                mock.patch.object(mods, "inspect_artifact") as inspect:
+            with self.assertRaises(FoundryError) as caught:
+                mods.inventory(source)
+        self.assertEqual("inventory_scan_bound", caught.exception.code)
+        self.assertEqual(2, caught.exception.details["maximum"])
+        self.assertEqual(3, len(events["yielded"]))  # Exactly one overflow probe.
+        self.assertEqual(2, len(events["statted"]))
+        self.assertEqual([source], events["opened"])
+        self.assertEqual(events["opened"], events["closed"])
+        inspect.assert_not_called()
+        self.assertEqual(before, {path: path.read_bytes() for path in source.iterdir()})
+
+    def test_inventory_scan_budget_counts_directories_and_is_cumulative(self):
+        source = self.root / "cumulative"
+        for name in ("one", "two"):
+            child = source / name
+            child.mkdir(parents=True)
+            (child / "ignored.txt").write_bytes(b"fabricated")
+        scanner, events = self.tracked_scanner()
+        with mock.patch.object(mods, "MAX_SCAN_ENTRIES", 3), \
+                mock.patch.object(mods.os, "scandir", side_effect=scanner):
+            with self.assertRaises(FoundryError) as caught:
+                mods.inventory(source)
+        self.assertEqual("inventory_scan_bound", caught.exception.code)
+        self.assertEqual(4, len(events["yielded"]))
+        self.assertEqual(3, len(events["statted"]))
+        self.assertEqual(events["opened"], events["closed"])
+        with mock.patch.object(mods, "MAX_SCAN_ENTRIES", 4):
+            self.assertEqual([], mods.inventory(source)["artifacts"])
+        self.assertEqual(b"fabricated", (source / "one" / "ignored.txt").read_bytes())
+        self.assertEqual(b"fabricated", (source / "two" / "ignored.txt").read_bytes())
+
+    def test_inventory_depth_refuses_before_over_limit_descent(self):
+        source = self.root / "depth"
+        deepest = source / "one" / "two"
+        deepest.mkdir(parents=True)
+        artifact = deepest / "fixture.package"
+        artifact.write_bytes(b"DBPFfabricated")
+        with mock.patch.object(mods, "MAX_SCAN_DEPTH", 2):
+            accepted = mods.inventory(source)
+        self.assertEqual(["one/two/fixture.package"], [row["relative"] for row in accepted["artifacts"]])
+        beyond = deepest / "three"
+        beyond.mkdir()
+        scanner, events = self.tracked_scanner()
+        with mock.patch.object(mods, "MAX_SCAN_DEPTH", 2), \
+                mock.patch.object(mods.os, "scandir", side_effect=scanner), \
+                mock.patch.object(mods, "inspect_artifact") as inspect:
+            with self.assertRaises(FoundryError) as caught:
+                mods.inventory(source)
+        self.assertEqual("inventory_depth_bound", caught.exception.code)
+        self.assertEqual(2, caught.exception.details["maximum"])
+        self.assertEqual([source, source / "one", deepest], events["opened"])
+        self.assertNotIn(beyond, events["opened"])
+        self.assertEqual(events["opened"], events["closed"])
+        inspect.assert_not_called()
+        self.assertEqual(b"DBPFfabricated", artifact.read_bytes())
+
+    def test_inventory_never_descends_into_observed_symlink(self):
+        source, outside = self.root / "linked-scan", self.root / "outside"
+        source.mkdir()
+        outside.mkdir()
+        sentinel = outside / "untouched.package"
+        sentinel.write_bytes(b"DBPFoutside fabricated sentinel")
+        alias = source / "alias"
+        try:
+            alias.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest("Symlinks are unavailable on this runner")
+        scanner, events = self.tracked_scanner()
+        with mock.patch.object(mods.os, "scandir", side_effect=scanner), \
+                mock.patch.object(mods, "inspect_artifact") as inspect:
+            with self.assertRaises(FoundryError) as caught:
+                mods.inventory(source)
+        self.assertEqual("linked_path", caught.exception.code)
+        self.assertEqual([source], events["opened"])
+        self.assertEqual(events["opened"], events["closed"])
+        inspect.assert_not_called()
+        self.assertTrue(alias.is_symlink())
+        self.assertEqual(b"DBPFoutside fabricated sentinel", sentinel.read_bytes())
+
+    def test_inventory_reparse_attribute_refuses_before_descendant_scan(self):
+        # Portable branch coverage for Windows junction metadata, not a claim
+        # of a live Windows filesystem test on this runner.
+        entry = mock.Mock()
+        entry.path = str(self.source / "fabricated-junction")
+        entry.stat.return_value = SimpleNamespace(st_mode=stat.S_IFDIR | 0o700,
+                                                 st_file_attributes=0x400)
+        entries = mock.MagicMock()
+        entries.__enter__.return_value = iter([entry])
+        with mock.patch.object(mods.os, "scandir", return_value=entries) as scanner, \
+                mock.patch.object(mods, "inspect_artifact") as inspect:
+            with self.assertRaises(FoundryError) as caught:
+                mods.inventory(self.source)
+        self.assertEqual("linked_path", caught.exception.code)
+        scanner.assert_called_once_with(self.source)
+        entry.stat.assert_called_once_with(follow_symlinks=False)
+        entries.__exit__.assert_called_once()
+        inspect.assert_not_called()
+        self.assert_sources_unchanged()
+
+    def test_inventory_artifact_cap_is_preserved_before_inspection(self):
+        self.assertEqual(4096, mods.MAX_INVENTORY_ARTIFACTS)
+        scanner, events = self.tracked_scanner()
+        with mock.patch.object(mods, "MAX_INVENTORY_ARTIFACTS", 2), \
+                mock.patch.object(mods.os, "scandir", side_effect=scanner), \
+                mock.patch.object(mods, "inspect_artifact") as inspect:
+            with self.assertRaises(FoundryError) as caught:
+                mods.inventory(self.source)
+        self.assertEqual("inventory_bound", caught.exception.code)
+        self.assertEqual(3, len(events["yielded"]))
+        self.assertEqual(events["opened"], events["closed"])
+        inspect.assert_not_called()
+        self.assert_sources_unchanged()
+
+    def test_inventory_is_deterministic_across_directory_enumeration_order(self):
+        nested = self.source / "Alpha" / "nested.package"
+        nested.parent.mkdir()
+        nested.write_bytes(b"DBPFnested fabricated")
+        before = {path: path.read_bytes() for path in self.source.rglob("*") if path.is_file()}
+        expected = mods.inventory(self.source)
+        real_scandir = os.scandir
+
+        @contextmanager
+        def reversed_scan(path):
+            with real_scandir(path) as entries:
+                # Only this explicitly tiny fabricated tree is materialized.
+                rows = list(entries)
+            yield iter(reversed(rows))
+
+        with mock.patch.object(mods.os, "scandir", side_effect=reversed_scan):
+            actual = mods.inventory(self.source)
+        self.assertEqual(expected, actual)
+        relative = [row["relative"] for row in actual["artifacts"]]
+        self.assertEqual(sorted(relative), relative)
+        self.assertEqual(before, {path: path.read_bytes() for path in self.source.rglob("*") if path.is_file()})
+
     def assert_manifest_refused(self, manifest, code):
         original_manifest = copy.deepcopy(manifest)
         for execute in (False, True):
             destination = self.root / ("execute" if execute else "dry-run")
-            with self.subTest(execute=execute), mock.patch.object(mods, "inspect_artifact") as inspect:
+            with self.subTest(execute=execute), mock.patch.object(mods, "inspect_artifact") as inspect, \
+                    mock.patch.object(Path, "mkdir", side_effect=AssertionError("must refuse before mkdir")):
                 with self.assertRaises(FoundryError) as caught:
                     mods.stage(manifest, destination, execute=execute)
                 self.assertEqual(code, caught.exception.code)
@@ -68,6 +246,131 @@ class ModUpdateAdversarialTests(unittest.TestCase):
             self.assertFalse(destination.exists())
             self.assert_sources_unchanged()
             self.assertEqual(original_manifest, manifest)
+
+    def test_manifest_relative_depth_is_bounded_before_parent_prefixes(self):
+        manifest = self.manifest(("first.package",))
+        row = manifest["artifacts"][0]
+        row["relative"] = "a/" * mods.MAX_SCAN_DEPTH + row["name"]
+        self.signed(manifest)
+        self.assertEqual(manifest, mods._manifest(manifest))
+        self.assertFalse(mods.stage(manifest, self.root / "within-depth")["executed"])
+        self.assertFalse((self.root / "within-depth").exists())
+        row["relative"] = "a/" + row["relative"]
+        self.signed(manifest)
+        with mock.patch.object(mods, "PurePosixPath", side_effect=AssertionError("must bound before Path.parents")):
+            self.assert_manifest_refused(manifest, "invalid_manifest")
+
+    def test_manifest_relative_component_and_total_lengths_refuse_before_io(self):
+        for relative in ("x" * 248 + ".package", "\U0001F642" * 124 + ".package",
+                         "a" * 120 + "/" + "b" * 128 + "/first.package"):
+            with self.subTest(relative_length=len(relative)):
+                manifest = self.manifest(("first.package",))
+                manifest["artifacts"][0].update(name=relative.rsplit("/", 1)[-1], relative=relative)
+                self.assert_manifest_refused(self.signed(manifest), "invalid_manifest")
+
+    def test_full_staging_target_path_bound_refuses_before_source_io_or_mkdir(self):
+        manifest = self.manifest(("first.package",))
+        destination = self.root / "long-target"
+        prefix_units = len(str(destination / "artifacts").encode("utf-16-le")) // 2 + 1
+        relative_length = mods.MAX_MOD_PATH_UNITS - prefix_units + 1
+        relative = "x" * (relative_length - len(".package")) + ".package"
+        manifest["artifacts"][0].update(name=relative, relative=relative)
+        self.signed(manifest)
+        self.assertEqual(manifest, mods._manifest(manifest))
+        for execute in (False, True):
+            with self.subTest(execute=execute), mock.patch.object(mods, "inspect_artifact") as inspect, \
+                    mock.patch.object(mods, "external_path", side_effect=AssertionError("must refuse before filesystem guard")), \
+                    mock.patch.object(Path, "mkdir", side_effect=AssertionError("must refuse before mkdir")):
+                with self.assertRaises(FoundryError) as caught:
+                    mods.stage(manifest, destination, execute=execute)
+            self.assertEqual("staging_path_bound", caught.exception.code)
+            inspect.assert_not_called()
+            self.assertFalse(destination.exists())
+        self.assert_sources_unchanged()
+
+    def test_receipt_publication_paths_are_bounded_even_for_an_empty_inventory(self):
+        manifest = self.manifest(())
+        pending_name = ".staging-complete.json." + "0" * 32 + ".pending"
+        suffix_units = len("/" + pending_name)
+        prefix_units = len(str(self.root).encode("utf-16-le")) // 2 + 1
+        fitting_name = "d" * (mods.MAX_MOD_PATH_UNITS - prefix_units - suffix_units)
+        fitting = self.root / fitting_name
+        self.assertFalse(mods.stage(manifest, fitting)["executed"])
+        self.assertFalse(fitting.exists())
+        destination = self.root / (fitting_name + "d")
+        final_units = len(str(destination / "staging-complete.json").encode("utf-16-le")) // 2
+        self.assertLessEqual(final_units, mods.MAX_MOD_PATH_UNITS)
+        for execute in (False, True):
+            with self.subTest(execute=execute), \
+                    mock.patch.object(mods, "external_path", side_effect=AssertionError("must refuse before filesystem guard")), \
+                    mock.patch.object(Path, "mkdir", side_effect=AssertionError("must refuse before mkdir")):
+                with self.assertRaises(FoundryError) as caught:
+                    mods.stage(manifest, destination, execute=execute)
+            self.assertEqual("staging_path_bound", caught.exception.code)
+            self.assertFalse(destination.exists())
+        self.assert_sources_unchanged()
+
+    def test_created_directory_bound_is_checked_separately_from_file_path(self):
+        manifest = self.manifest(("first.package",))
+        destination = self.root / "directory-length"
+        prefix_units = len(str(destination / "artifacts").encode("utf-16-le")) // 2 + 1
+        folder = "d" * (mods.MAX_MOD_DIRECTORY_UNITS - prefix_units)
+        row = manifest["artifacts"][0]
+        row.update(name="a.package", relative=folder + "/a.package")
+        self.signed(manifest)
+        self.assertFalse(mods.stage(manifest, destination)["executed"])
+        self.assertFalse(destination.exists())
+        row["relative"] = folder + "d/a.package"
+        self.signed(manifest)
+        target_units = len(str(destination / "artifacts" / row["relative"]).encode("utf-16-le")) // 2
+        self.assertLessEqual(target_units, mods.MAX_MOD_PATH_UNITS)
+        for execute in (False, True):
+            with mock.patch.object(mods, "inspect_artifact") as inspect, \
+                    mock.patch.object(Path, "mkdir", side_effect=AssertionError("must refuse before mkdir")):
+                with self.assertRaises(FoundryError) as caught:
+                    mods.stage(manifest, destination, execute=execute)
+            self.assertEqual("staging_path_bound", caught.exception.code)
+            inspect.assert_not_called()
+            self.assertFalse(destination.exists())
+        self.assert_sources_unchanged()
+
+    def test_utf8_component_byte_limit_is_distinct_from_windows_units(self):
+        manifest = self.manifest(("first.package",))
+        relative = "\U0001F642" * 64 + ".package"
+        self.assertLess(len(relative.encode("utf-16-le")) // 2, mods.MAX_MOD_COMPONENT_UNITS)
+        self.assertGreater(len(relative.encode("utf-8")), mods.MAX_MOD_COMPONENT_BYTES)
+        manifest["artifacts"][0].update(name=relative, relative=relative)
+        self.assert_manifest_refused(self.signed(manifest), "invalid_manifest")
+
+    def test_utf8_destination_component_refuses_before_filesystem_io(self):
+        manifest = self.manifest(("first.package",))
+        destination = self.root / ("\U0001F642" * 64)
+        before = list(self.root.iterdir())
+        for execute in (False, True):
+            with mock.patch.object(mods, "inspect_artifact") as inspect, \
+                    mock.patch.object(mods, "external_path", side_effect=AssertionError("must refuse before filesystem guard")), \
+                    mock.patch.object(Path, "mkdir", side_effect=AssertionError("must refuse before mkdir")):
+                with self.assertRaises(FoundryError) as caught:
+                    mods.stage(manifest, destination, execute=execute)
+            self.assertEqual("staging_path_bound", caught.exception.code)
+            inspect.assert_not_called()
+        self.assertEqual(before, list(self.root.iterdir()))
+        self.assert_sources_unchanged()
+
+    def test_oversized_destination_component_refuses_lexically(self):
+        manifest = self.manifest(("first.package",))
+        before = list(self.root.iterdir())
+        destination = self.root / ("d" * 256)
+        for execute in (False, True):
+            with self.subTest(execute=execute), mock.patch.object(mods, "inspect_artifact") as inspect, \
+                    mock.patch.object(mods, "external_path", side_effect=AssertionError("must refuse before filesystem guard")), \
+                    mock.patch.object(Path, "mkdir", side_effect=AssertionError("must refuse before mkdir")):
+                with self.assertRaises(FoundryError) as caught:
+                    mods.stage(manifest, destination, execute=execute)
+            self.assertEqual("staging_path_bound", caught.exception.code)
+            inspect.assert_not_called()
+        self.assertEqual(before, list(self.root.iterdir()))
+        self.assert_sources_unchanged()
 
     def test_source_destination_extension_confusion_refuses_before_io(self):
         for source, relative in (("first.package", "renamed.ts4script"),

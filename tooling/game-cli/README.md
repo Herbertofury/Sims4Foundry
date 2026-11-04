@@ -117,6 +117,15 @@ foundry-game mods stage --manifest ./candidate-inventory.json --destination ./st
 
 Staging requires matching source/destination artifact extensions and rejects
 case-insensitive file/directory path conflicts before creating the output tree.
+Inventory scans at most 16,384 entries across 32 nested directory levels and
+accepts at most 4,096 artifacts. Observed symlinks and Windows reparse points
+are rejected before descent; only bounded artifact rows are sorted.
+Manifest paths have the same depth limit. Mod output paths, including temporary
+receipt filenames, are limited to 259 UTF-16 units overall, with created directory
+paths capped at 247. Each component is limited to both 255 UTF-16 units and 255
+UTF-8 bytes before source reads or directory creation. These are conservative
+portability limits, without assuming Windows long-path support; see Microsoft's
+[path-length guidance](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation).
 Hashes are bounded to the observed file size and copies to the inventoried size,
 with one extra read probe that is never written. A changing source leaves an incomplete staging
 tree without a completion marker; retrying never overwrites that tree.

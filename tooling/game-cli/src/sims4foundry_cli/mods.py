@@ -4,6 +4,7 @@ This module never installs into a live profile, downloads, imports, or executes
 mods. A valid hash/archive is not a compatibility or malware-safety verdict.
 """
 import hashlib
+import os
 from pathlib import Path, PurePosixPath
 import stat
 import zipfile
@@ -13,6 +14,62 @@ from .io import (digest, exact_fields, exact_int, external_path, new_json,
 
 MAX_ARTIFACT = 512 * 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
+MAX_INVENTORY_ARTIFACTS = 4096
+# Count every entry below the selected root, including irrelevant files and
+# directories. Root depth is zero; at most 32 nested directories are scanned.
+MAX_SCAN_ENTRIES = 16384
+MAX_SCAN_DEPTH = 32
+# Conservative Windows output portability without assuming long-path support.
+# MAX_PATH includes a terminating NUL; these limits count UTF-16 code units.
+MAX_MOD_PATH_UNITS = 259
+MAX_MOD_COMPONENT_UNITS = 255
+MAX_MOD_DIRECTORY_UNITS = 247
+MAX_MOD_COMPONENT_BYTES = 255
+
+
+def _within_path_units(value, maximum):
+    if len(value) > maximum:
+        return False
+    try:
+        return len(value.encode("utf-16-le")) <= maximum * 2
+    except UnicodeEncodeError:
+        return False
+
+
+def _mod_relative(value):
+    # Bound the string and depth before constructing Path.parents prefixes.
+    if not isinstance(value, str) or not _within_path_units(value, MAX_MOD_PATH_UNITS):
+        return False
+    parts = value.split("/")
+    return (len(parts) <= MAX_SCAN_DEPTH + 1
+            and all(_mod_component(part) for part in parts)
+            and safe_relative(value))
+
+
+def _mod_component(value):
+    # Enforce both representations on every host so a Windows-valid spelling
+    # does not produce an unstaggable inventory on ordinary UTF-8 filesystems.
+    return (_within_path_units(value, MAX_MOD_COMPONENT_UNITS)
+            and len(value.encode("utf-8")) <= MAX_MOD_COMPONENT_BYTES)
+
+
+def _check_staging_paths(destination, artifacts):
+    relative_paths = ["staging-intent.json", "staging-complete.json"]
+    # new_json publishes through this same-directory temporary-name shape.
+    # Its complete path, not just the final receipt name, must remain usable.
+    relative_paths.extend("." + name + "." + "0" * 32 + ".pending"
+                          for name in tuple(relative_paths))
+    relative_paths.extend("artifacts/" + row["relative"] for row in artifacts)
+    for relative in relative_paths:
+        path = destination / relative
+        if (not _within_path_units(str(path), MAX_MOD_PATH_UNITS)
+                or not _within_path_units(str(path.parent), MAX_MOD_DIRECTORY_UNITS)
+                or any(not _mod_component(part) for part in path.parts if part != path.anchor)):
+            raise FoundryError("staging_path_bound", "Staging output exceeds supported path-length bounds.",
+                               maximum_path_units=MAX_MOD_PATH_UNITS,
+                               maximum_component_units=MAX_MOD_COMPONENT_UNITS,
+                               maximum_component_bytes=MAX_MOD_COMPONENT_BYTES,
+                               maximum_directory_units=MAX_MOD_DIRECTORY_UNITS)
 
 
 def _bounded_chunks(stream, expected_size, code):
@@ -86,26 +143,58 @@ def inspect_artifact(path):
     return {"name": path.name, "source": str(path), "bytes": size, "sha256": before, **inspection}
 
 
+def _inventory_files(directory):
+    """Bound enumeration before allocation, descent, or artifact inspection.
+
+    One over-limit entry may be obtained to detect exhaustion, but is neither
+    inspected nor descended into. Each directory handle closes before another
+    is opened. Observed links/reparse points refuse, not a hostile-FS guarantee.
+    """
+    pending, paths, visited = [(directory, 0)], [], 0
+    while pending:
+        current, depth = pending.pop()
+        with os.scandir(plain_path(current)) as entries:
+            for entry in entries:
+                visited += 1
+                if visited > MAX_SCAN_ENTRIES:
+                    raise FoundryError("inventory_scan_bound", "Inventory exceeds its total directory-entry scan bound.",
+                                       maximum=MAX_SCAN_ENTRIES)
+                # DirEntry's non-following stat observes Windows junctions and
+                # other reparse entries before queuing any descendant scan.
+                info = entry.stat(follow_symlinks=False)
+                if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise FoundryError("linked_path", "Symlinks and Windows reparse points are not accepted.", path=entry.path)
+                path = plain_path(entry.path)
+                if stat.S_ISDIR(info.st_mode):
+                    if depth >= MAX_SCAN_DEPTH:
+                        raise FoundryError("inventory_depth_bound", "Inventory exceeds its nested-directory depth bound.",
+                                           maximum=MAX_SCAN_DEPTH)
+                    pending.append((path, depth + 1))
+                elif stat.S_ISREG(info.st_mode) and path.suffix.lower() in (".package", ".ts4script"):
+                    if len(paths) >= MAX_INVENTORY_ARTIFACTS:
+                        raise FoundryError("inventory_bound", "Inventory exceeds 4096 artifacts.")
+                    paths.append(path)
+    return paths
+
+
 def inventory(directory):
     directory = plain_path(directory)
     if not directory.is_dir():
         raise FoundryError("missing_directory", "Artifact directory is missing.")
     rows = []
     seen = set()
-    for path in sorted(directory.rglob("*")):
-        plain_path(path)
-        if path.is_file() and path.suffix.lower() in (".package", ".ts4script"):
-            if len(rows) >= 4096:
-                raise FoundryError("inventory_bound", "Inventory exceeds 4096 artifacts.")
-            row = inspect_artifact(path)
-            row["relative"] = path.relative_to(directory).as_posix()
-            if not safe_relative(row["relative"]):
-                raise FoundryError("artifact_path", "Artifact path is not portable to Windows.")
-            key = row["relative"].casefold()
-            if key in seen:
-                raise FoundryError("duplicate_artifact", "Case-colliding artifact paths are not portable.")
-            seen.add(key)
-            rows.append(row)
+    for path in _inventory_files(directory):
+        relative = path.relative_to(directory).as_posix()
+        if not _mod_relative(relative):
+            raise FoundryError("artifact_path", "Artifact path is not portable to Windows.")
+        row = inspect_artifact(path)
+        row["relative"] = relative
+        key = row["relative"].casefold()
+        if key in seen:
+            raise FoundryError("duplicate_artifact", "Case-colliding artifact paths are not portable.")
+        seen.add(key)
+        rows.append(row)
+    rows.sort(key=lambda row: row["relative"])
     result = {"schema": 1, "artifacts": rows, "kind": "foundry_mod_inventory", "game_modified": False}
     result["manifest_sha256"] = digest(result)
     return _manifest(result)
@@ -118,14 +207,14 @@ def _manifest(value):
     unsigned = {key: item for key, item in value.items() if key != "manifest_sha256"}
     if digest(unsigned) != value["manifest_sha256"]:
         raise FoundryError("manifest_digest", "Inventory digest does not match.")
-    if not isinstance(value["artifacts"], list) or len(value["artifacts"]) > 4096:
+    if not isinstance(value["artifacts"], list) or len(value["artifacts"]) > MAX_INVENTORY_ARTIFACTS:
         raise FoundryError("invalid_manifest", "Artifact list exceeds its bound.")
     seen, parent_paths = set(), set()
     for row in value["artifacts"]:
         if not isinstance(row, dict):
             raise FoundryError("invalid_manifest", "Artifact row is not an object.")
         relative = row.get("relative")
-        if (not safe_relative(relative) or PurePosixPath(relative).name != row.get("name")
+        if (not _mod_relative(relative) or PurePosixPath(relative).name != row.get("name")
                 or PurePosixPath(relative).suffix.lower() not in (".package", ".ts4script")
                 or not isinstance(row.get("source"), str) or not row["source"] or "\x00" in row["source"]):
             raise FoundryError("invalid_manifest", "Artifact has an unsafe relative path.")
@@ -161,6 +250,10 @@ def compare(before, after):
 
 def stage(manifest, destination, execute=False):
     _manifest(manifest)
+    # Length checks are lexical and precede filesystem calls, which may already
+    # fail on an oversized component even when the output does not exist.
+    destination = Path(os.path.abspath(destination))
+    _check_staging_paths(destination, manifest["artifacts"])
     destination = external_path(destination)
     if destination.exists():
         raise FoundryError("destination_exists", "Staging requires a never-existing external directory.")
@@ -184,7 +277,6 @@ def stage(manifest, destination, execute=False):
         with plain_path(row["source"]).open("rb") as src, target.open("xb") as dst:
             _copy_artifact(src, dst, row["bytes"])
             dst.flush()
-            import os
             os.fsync(dst.fileno())
         if target.stat().st_size != row["bytes"] or _hash_artifact(target, row["bytes"], "copy_changed") != row["sha256"]:
             raise FoundryError("copy_changed", "Copied artifact did not match. Staging is incomplete, not installable.", destination=str(destination))
