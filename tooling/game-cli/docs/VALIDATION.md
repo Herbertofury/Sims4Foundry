@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- `python -m unittest discover -s tests -v`: 107 tests collected: 103 passed, 4 CI-only Windows fixture tests skipped.
+- `python -m unittest discover -s tests -v`: 261 tests collected: 254 passed, 7 CI-only Windows fixture tests skipped.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -48,3 +48,22 @@ A later future-sender review added regression coverage for stale guards across
 journal I/O, signed wheel targeting, direct-packet timing/path limits and deferring
 optional journal records until paired release. Native backend calls must still be
 bounded; the backend-injected runner cannot supervise a hung native call.
+
+At remote head 84bf546aa674010df68d05bc788311e044045910, all four Windows/Linux
+Python 3.11/3.13 jobs passed, including the fourth native fixture's exact message
+receipt and unchanged OS cursor/foreground checks. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41802314102
+
+Later local source adds a strict framed companion protocol, an uninstalled
+Python-3.7-compatible owner queue/native API adapter, and a cooperative process
+lease. Its three extra Windows mutex fixture tests have not yet run in CI.
+On actual isolated Python 3.7.17, all 63 companion queue/native tests passed.
+The official source SHA-256 was
+7911051ed0422fd54b8f59ffc030f7cf2ae30e0f61bda191800bb040dce4f9d2;
+the interpreter bytecode magic is 420d0d0a. This tested fabricated services and
+native call signatures, not Sims. No script-mod package was built or installed.
+The interpreter is an offline compatibility tool only, not the CLI/runtime server.
+
+Review also corrected command-module import ordering before mutation admission,
+speed-result verification across save/mode context changes, and Windows liveness
+checks that must not rely on the undefined running-process exit FILETIME.

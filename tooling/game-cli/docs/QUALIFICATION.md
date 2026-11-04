@@ -12,11 +12,11 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | Plan/execute/reconcile | Synthetic model | Python tests and crash/lock checks | No |
 | Mod inventory/diff/staging | Real local file operations | Synthetic artifacts | No gameplay/compatibility claim |
 | Apex source migration inventory | AST-only read | Historical source snapshot | Not an input adapter |
-| Windows process/window inspection | Query-only implementation | Pure contract tests | Pending Windows/game test |
+| Windows process/window inspection | Query-only implementation | Contract tests and native Windows CI fixture | Pending current game test |
 | WGC capture | Pinned helper implementation | Mock helper plus real PNG validation | Pending current game test |
-| No-Apex click/key/scroll/drag | Not shipped | Not run | No |
-| Foundry semantic game bridge | Not shipped | Not run | No |
-| No-Apex launch/entry/save/load/exit | Not shipped | Not run | No |
+| No-Apex click/key/scroll/drag | Pure packet plans and injected runner only | Synthetic guard tests; fixture transport CI pending | No |
+| Foundry semantic game bridge | Uninstalled typed queue and narrow native bindings; no transport/bootstrap | Fabricated services on actual Python 3.7 | No |
+| No-Apex launch/entry/save/load/exit | Launch metadata preparation only | Synthetic EA metadata tests | No |
 
 ## Required controlled validation
 
@@ -53,9 +53,9 @@ profile with a matching, separately reviewed journal and a restoration procedure
 
 ## Still required engineering
 
-- A mod-neutral native bridge/protocol with bounded, per-operation commands.
+- Wire the offline protocol, owner queue and native bindings into an independently admitted, authenticated mod-neutral host. Preserve process epoch and zone/household/save preconditions across the boundary.
 - A separately qualified external menu/input provider, including scroll/drag/keys.
-- Cross-workspace process-lifetime leases and interference detection.
+- Integrate the cooperative process-lifetime lease with a shared durable journal and detect nonparticipating user/Apex/other-tool interference. A lease alone does not authorize input.
 - Windows crash-durable pre-dispatch evidence ordering.
 - Semantic state readers and independently checkable predicates for all domains.
 - Reviewed, reversible mod installation/update/rollback on a closed disposable

@@ -88,7 +88,9 @@ def inspect(pid, executable, expected_sha256, hwnd=None):
     def times(handle):
         created, exited, cpu, wall = (wt.FILETIME() for _ in range(4))
         require(process_times(handle, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(cpu), ctypes.byref(wall)), "Cannot inspect process lifetime.")
-        if exited.dwLowDateTime or exited.dwHighDateTime or wait(handle, 0) != 0x102:
+        # GetProcessTimes documents exit FILETIME as undefined for a running
+        # process. The pinned handle's nonsignalled wait is the liveness proof.
+        if wait(handle, 0) != 0x102:
             raise FoundryError("process_gone", "The selected process is not running.")
         return (created.dwHighDateTime << 32) | created.dwLowDateTime
 

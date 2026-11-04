@@ -147,3 +147,13 @@ running desktop. CI uses Linux and Windows runners, including an isolated native
 but does not test the game or run on the user's desktop.
 See [Architecture](docs/ARCHITECTURE.md), [Validation](docs/VALIDATION.md) and
 [qualification gates](docs/QUALIFICATION.md) before adding real mutation support.
+
+## Uninstalled companion components
+
+The `companion-src/foundry_companion` sources are a Python-3.7-compatible bounded
+owner-thread queue and narrow native call bindings. They start no server, install
+no hooks, and default to denied admission. Tests use fabricated game services.
+They are not an installable mod or a working CAS/Build controller. See
+[COMPANION.md](docs/COMPANION.md) for implemented boundaries and missing integration.
+The client also has an offline framed protocol and a cooperative Windows process
+lease. Neither bypasses the live qualification gate or resolves earlier actions.
