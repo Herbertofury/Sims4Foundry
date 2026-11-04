@@ -66,6 +66,63 @@ def read_closed(connection):
         return b''
 
 
+def surplus_peer_closed(error):
+    """Close variants for the surplus-input rejection fixture only."""
+    return (isinstance(error, OSError) and not isinstance(error, (TimeoutError, socket.timeout))
+            and (closed_socket_error(error)
+                 or getattr(error, 'errno', None) in (10053, 10054, 10057, 10058)))
+
+
+def read_surplus_rejection(connection, deadline):
+    """A complete exact error, or None for an observed closed exchange.
+
+    An OS reset may discard any suffix of the error sent before closing with
+    unread surplus input. Partial bytes are NOT a decoded/valid response. This
+    allowance is only for this negative fixture, never the production codec.
+    """
+    result = bytearray()
+    limit = auth.MAX_AUTH_BYTES + 4
+    while True:
+        connection.settimeout(auth._remaining(deadline))
+        try:
+            chunk = connection.recv(limit + 1 - len(result))
+        except OSError as error:
+            if not surplus_peer_closed(error):
+                raise
+            break
+        if not chunk:
+            break
+        result.extend(chunk)
+        if len(result) > limit:
+            raise AssertionError('Surplus rejection reply exceeds the fixture bound.')
+    if len(result) < 4:
+        return None  # EOF/reset, not a complete frame prefix.
+    size = struct.unpack('>I', result[:4])[0]
+    if not 1 <= size <= auth.MAX_AUTH_BYTES:
+        raise AssertionError('Invalid surplus rejection frame length.')
+    if len(result) < size + 4:
+        return None  # EOF/reset, not a complete error envelope.
+    if len(result) != size + 4:
+        raise AssertionError('Extra bytes after surplus rejection frame.')
+    value = wire.decode_payload(bytes(result[4:]))
+    expected = {'schema': 2, 'kind': 'error', 'code': 'extra_frame', 'outcome_known': False}
+    if (value != expected or type(value.get('schema')) is not int
+            or value.get('outcome_known') is not False):
+        raise AssertionError('Expected only the exact extra_frame error envelope.')
+    return value
+
+
+def exchange_surplus_rejection(connection, payload, deadline):
+    try:
+        connection.sendall(payload)
+        connection.shutdown(socket.SHUT_WR)
+    except OSError as error:
+        if not surplus_peer_closed(error):
+            raise
+        # Do not retry the uncertain write. Validate any surviving reply bytes.
+    return read_surplus_rejection(connection, deadline)
+
+
 def submission(number=1):
     return {'schema': 2, 'kind': 'submit', 'ttl_seconds': 5.0, 'expected_context': None,
             'request': {'schema': 1, 'kind': 'request', 'request_id': '{:032x}'.format(number),
@@ -239,6 +296,91 @@ class AuthCodecTests(unittest.TestCase):
         self.assertEqual([1, .9000000000000057, .5], source.timeouts)
 
 
+class SurplusRejectionFixtureTests(unittest.TestCase):
+    class Connection(BytesSocket):
+        def __init__(self, data, terminal=None, failing_stage=None):
+            super().__init__(data, width=3)
+            self.terminal = terminal
+            self.failing_stage = failing_stage
+            self.sent = self.shutdowns = 0
+
+        def sendall(self, payload):
+            self.sent += 1
+            if self.failing_stage == 'sendall':
+                raise self.terminal
+
+        def shutdown(self, how):
+            self.shutdowns += 1
+            if self.failing_stage == 'shutdown':
+                raise self.terminal
+
+        def recv(self, size):
+            if not self.data and self.terminal is not None:
+                raise self.terminal
+            return super().recv(size)
+
+    def expected(self):
+        return {'schema': 2, 'kind': 'error', 'code': 'extra_frame', 'outcome_known': False}
+
+    def close_variants(self):
+        windows = OSError('fixture WinSock property')
+        windows.winerror = 10054
+        return (None, ConnectionResetError(errno.ECONNRESET, 'fixture reset'),
+                ConnectionAbortedError(errno.ECONNABORTED, 'fixture abort'),
+                OSError(errno.ENOTCONN, 'fixture closed'), BrokenPipeError(errno.EPIPE, 'fixture pipe'),
+                OSError(10053, 'fixture WinSock abort'), OSError(10054, 'fixture WinSock reset'),
+                OSError(10057, 'fixture WinSock closed'), windows)
+
+    def test_every_partial_error_prefix_payload_and_close_variant_is_not_a_frame(self):
+        frame = wire.encode_frame(self.expected())
+        for close in self.close_variants():
+            for cut in range(len(frame) + 1):
+                connection = self.Connection(frame[:cut], close)
+                with self.subTest(cut=cut, close=repr(close)):
+                    reply = read_surplus_rejection(connection, time.monotonic() + 1)
+                    if cut == len(frame):
+                        self.assertEqual(self.expected(), reply)
+                    else:
+                        self.assertIsNone(reply)
+
+    def test_send_and_shutdown_closures_never_retry_and_still_validate_reply(self):
+        frame = wire.encode_frame(self.expected())
+        for stage in ('sendall', 'shutdown'):
+            for close in self.close_variants()[1:]:
+                for data in (b'', frame[:3], frame[:12], frame):
+                    connection = self.Connection(data, close, stage)
+                    with self.subTest(stage=stage, close=repr(close), count=len(data)):
+                        reply = exchange_surplus_rejection(connection, b'fabricated surplus', time.monotonic() + 1)
+                        self.assertEqual(self.expected() if data == frame else None, reply)
+                        self.assertEqual(1, connection.sent)
+                        self.assertEqual(0 if stage == 'sendall' else 1, connection.shutdowns)
+
+    def test_timeouts_and_unrelated_errors_fail_even_after_partial_or_complete_error(self):
+        frame = wire.encode_frame(self.expected())
+        errors = (socket.timeout('fixture timeout'), TimeoutError(errno.ECONNRESET, 'still a timeout'),
+                  OSError(errno.EIO, 'fixture unexpected'), OSError(10060, 'WinSock timeout'))
+        for stage in ('sendall', 'shutdown', 'recv'):
+            for error in errors:
+                for data in (b'', frame[:3], frame[:12], frame):
+                    connection = self.Connection(data, error, stage)
+                    with self.subTest(stage=stage, error=repr(error), count=len(data)), self.assertRaises(OSError):
+                        exchange_surplus_rejection(connection, b'fabricated surplus', time.monotonic() + 1)
+
+    def test_complete_malformed_extra_or_success_frames_fail_even_with_reset(self):
+        expected = self.expected()
+        values = (dict(expected, code='peer_denied'), dict(expected, outcome_known=0),
+                  dict(expected, schema=2.0), dict(expected, extra=True),
+                  {'schema': 2, 'kind': 'receipt', 'state': 'accepted'})
+        frames = [wire.encode_frame(value) for value in values]
+        frames += [wire.encode_frame(expected) + suffix for suffix in (b'x', b'\x00', wire.encode_frame(expected))]
+        frames += [struct.pack('>I', size) for size in (0, auth.MAX_AUTH_BYTES + 1)]
+        frames += [struct.pack('>I', 1) + b'{', b'x' * (auth.MAX_AUTH_BYTES + 5)]
+        for frame in frames:
+            for close in (None, ConnectionResetError(errno.ECONNRESET, 'fixture reset')):
+                with self.subTest(frame=frame, close=repr(close)), self.assertRaises((AssertionError, wire.ProtocolError)):
+                    read_surplus_rejection(self.Connection(frame, close), time.monotonic() + 1)
+
+
 class AuthSocketTests(unittest.TestCase):
     def setUp(self):
         self.policy = FabricatedPolicy()
@@ -346,13 +488,17 @@ class AuthSocketTests(unittest.TestCase):
 
     def test_surplus_proof_after_authentication_prevents_all_admission(self):
         connection = self.connect(); client = self.handshake(connection)
-        connection.sendall(wire.encode_frame(client) + wire.encode_frame(submission()))
-        connection.shutdown(socket.SHUT_WR)
-        # Transport may emit its bounded generic error, but cannot access records.
-        reply = auth._read(connection, time.monotonic() + 1)
-        self.assertEqual('error', reply['kind'])
-        self.assertEqual('extra_frame', reply['code'])
+        # Closing unread surplus input may reset/abort before the complete error
+        # is delivered. Only an exact complete error or an observed closed
+        # exchange is allowed; partial bytes are never treated as a valid reply.
+        reply = exchange_surplus_rejection(
+            connection, wire.encode_frame(client) + wire.encode_frame(submission()),
+            time.monotonic() + 1)
+        if reply is not None:
+            self.assertEqual({'schema': 2, 'kind': 'error', 'code': 'extra_frame',
+                              'outcome_known': False}, reply)
         self.assertEqual([], self.policy.submits)
+        self.assertEqual(0, self.server.queue_status().retained)
         self.assertEqual({}, self.server._records)
 
     def test_wrong_session_pid_epoch_and_socket_binding_fail_before_server_proof(self):

@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 455 tests collected, 446 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, two additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 459 tests collected, 450 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, two additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -125,12 +125,21 @@ admission/no-dispatch checks, and still rejects timeouts, unrelated errors and
 partial/trailing response bytes. Six deterministic fixture regressions were
 added; production transport behavior was not relaxed.
 
-The peer-hook batch adds 28 authentication tests. All pass on the current
+The peer-hook batch adds 32 authentication tests. All pass on the current
 interpreter with the optional separate-Python-3.7 server test enabled. Real
-Python 3.7 runs 22 portable cases and skips six current-client cases. Tests cover
+Python 3.7 runs 26 portable cases and skips six current-client cases. Tests cover
 full pinned golden messages, mutual proofs, wrong keys, replay/reflection,
 two-connection relay rejection, malformed frames, absolute deadlines, secret
 redaction and no application access before authentication. This is an internal
 source/regression review, not an external cryptographic audit or game qualification.
 Secure key provisioning and qualified host/channel admission remain separate.
 The combined correction/authentication source still requires its exact-head CI.
+
+At peer-hook head 7344ed8829e2ab3ed8e2b473573f4932c968aa90, both Linux jobs
+passed. Windows exposed one remaining negative-fixture reset variant when rejecting
+a surplus authentication proof. The fixture now distinguishes an observed closed
+exchange from a fully validated exact error envelope. Four deterministic
+regressions cover every partial-response cutoff, EOF/reset/abort variants and
+send/shutdown failure without retry; malformed success/extra frames, timeouts and
+unrelated errors remain failures. Queue/record/submission counts must remain zero.
+Production authentication and codecs were unchanged.
