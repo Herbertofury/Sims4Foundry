@@ -12,11 +12,29 @@ Apex's runtime. Python 3.7 syntax alone does not prove current-game compatibilit
 No save/load, full-edit cheat, force quit, generic cheat or arbitrary command API.
 """
 import importlib
+from dataclasses import dataclass
 import threading
+
+from .queue import Request
 
 
 class NativeRefusal(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class HostModeDeclaration:
+    """Trusted host assertion, not independent UI evidence or authorization.
+
+    The same admission provider must observe exact mode synchronously on the
+    owner thread for every sample, without changing gameplay, Sim/instance or
+    household state, UI mode, or admission policy. Echoing context is not evidence.
+    This source supplies no implementation qualified to observe installed UI mode.
+    """
+    request: Request
+    client_id: str
+    sample_token: object
+    mode: str
 
 
 class DenyAdmission(object):
@@ -26,6 +44,9 @@ class DenyAdmission(object):
 
     def require_mutation(self, request, observation):
         raise NativeRefusal('Native mutation has not been admitted or qualified.')
+
+    def observe_mode(self, request, observation, sample_token):
+        raise NativeRefusal('An explicit qualified exact-mode observer is required.')
 
     def cas_scope(self, request, sim, client):
         raise NativeRefusal('A separately reviewed CAS preservation/frontdoor provider is required.')
@@ -55,7 +76,8 @@ def _speed(value):
     return int(value)
 
 
-def _same_live_context(before, after):
+def _same_running_context(before, after):
+    # These booleans are consistency checks, never exact UI-mode evidence.
     return (not after['errors'] and after['zone_running'] is True and after['in_build_buy'] is False
             and all(after[key] == before[key] for key in
                     ('zone_id', 'household_id', 'client_id', 'save_slot', 'save_guid')))
@@ -117,6 +139,7 @@ def _check_admission_request(request, admitted_view):
 class NativeAPI(object):
     def __init__(self, services, admission=None, command_loader=None,
                  session_id=None, process_epoch=None):
+        self._busy = False
         self._owner = threading.current_thread().ident
         self._owner_thread = threading.current_thread()
         self._services = services
@@ -187,6 +210,59 @@ class NativeAPI(object):
         self._bound(request)
         return self._read()
 
+    def _declared_mode(self, request, observation):
+        """Fresh correlated assertion from the existing trusted provider only.
+
+        This callback must be read-only: no gameplay/UI/admission-policy changes,
+        dispatch, command imports, I/O or waits. Native rereads are not a sandbox.
+        Generic read/mutation admission alone never supplies exact mode.
+        """
+        self._owned()
+        self._bound(request)
+        # Retained declarations keep old tokens alive. Identity rejects reuse
+        # across calls and adapter instances; it authenticates nothing.
+        sample_token = object()
+        view = _copy_request(request)
+        observation_view = dict(observation)
+        observation_view['errors'] = dict(observation['errors'])
+        try:
+            declaration = self._admission.observe_mode(view, observation_view, sample_token)
+            self._owned()
+            _check_admission_request(request, view)
+            if type(declaration) is not HostModeDeclaration:
+                raise NativeRefusal('A typed exact host mode declaration is required.')
+            _check_admission_request(request, declaration.request)
+            mode = declaration.mode
+            if (type(declaration.client_id) is not str
+                    or declaration.client_id != observation['client_id']
+                    or declaration.sample_token is not sample_token
+                    or type(mode) is not str
+                    or mode not in ('live', 'cas', 'build_buy', 'loading', 'menu', 'unknown')):
+                raise NativeRefusal('Exact host mode declaration is invalid or stale.')
+            self._bound(request)
+        except Exception:
+            # Neither arbitrary callback failures nor malformed returned objects
+            # may disclose exception text. This is not a sandbox for providers.
+            raise NativeRefusal('Exact host mode observation is unavailable or invalid.') from None
+        return mode
+
+    def _require_live_mode(self, request, observation):
+        mode = self._declared_mode(request, observation)
+        # Like mutation admission, this new trusted callback can have accidental
+        # side effects. Re-read once, without a recursive admission/mode loop.
+        current, client = self._read()
+        if mode != 'live' or not _same_running_context(observation, current):
+            raise NativeRefusal('Exact current Live mode and unchanged native context are required.')
+        return current, client
+
+    def _current_live_context(self, request, before):
+        # Used after CAS getters, before a consequential scope or dispatch.
+        # Readers/providers remain trusted and synchronous, not an atomic UI API.
+        current, client = self._read()
+        if not _same_running_context(before, current):
+            raise NativeRefusal('Native context changed while preparing CAS entry.')
+        return self._require_live_mode(request, current)
+
     def _before_mutation(self, request):
         observation, client = self._admitted_read(request)
         if (observation['errors'] or observation['zone_id'] != request.expected_zone_id
@@ -194,7 +270,7 @@ class NativeAPI(object):
                 or observation['save_slot'] != request.expected_save_slot
                 or observation['save_guid'] != request.expected_save_guid
                 or observation['zone_running'] is not True or observation['in_build_buy'] is not False):
-            raise NativeRefusal('Exact running Live zone/household context changed or is unobservable.')
+            raise NativeRefusal('Exact running zone/household/save context changed or is unobservable.')
         admitted_view = _copy_request(request)
         observation_view = dict(observation)
         observation_view['errors'] = dict(observation['errors'])
@@ -206,11 +282,21 @@ class NativeAPI(object):
         # An admission hook may itself change live context. One bounded read
         # checks its side effects without recursively entering admission again.
         current, current_client = self._read()
-        if not _same_live_context(observation, current):
+        if not _same_running_context(observation, current):
             raise NativeRefusal('Native context changed during mutation admission.')
-        return current, current_client
+        return self._require_live_mode(request, current)
 
     def execute(self, request):
+        self._owned()
+        if self._busy:
+            raise NativeRefusal('Reentrant native execution is refused.')
+        self._busy = True
+        try:
+            return self._execute(request)
+        finally:
+            self._busy = False
+
+    def _execute(self, request):
         """Called only by an admitted owner-thread queue, never a transport thread.
 
         A native returned value is not CAS visibility, save persistence or process
@@ -230,7 +316,7 @@ class NativeAPI(object):
 
         def fresh_context():
             value, client = self._before_mutation(request)
-            if not _same_live_context(preflight, value):
+            if not _same_running_context(preflight, value):
                 raise NativeRefusal('Native context changed while loading command modules.')
             return value, client
         arguments = request.arguments_dict()
@@ -239,8 +325,18 @@ class NativeAPI(object):
             before, client = fresh_context()
             speed = arguments['speed']
             command(('paused', 'one', 'two', 'three')[speed], 'foundry.cli', _connection=int(before['client_id']))
+            sampled, _ = self._read()
+            try:
+                mode = self._declared_mode(request, sampled)
+            except NativeRefusal:
+                mode = 'unknown'
+            # Verify the final clock, not a stale value from before the mode hook.
             after, _ = self._read()
-            matched = _same_live_context(before, after) and after['clock_speed'] == speed
+            after['host_mode'] = mode
+            after['mode_source'] = 'injected_host_declaration'
+            matched = (_same_running_context(before, sampled)
+                       and _same_running_context(sampled, after) and after['clock_speed'] == speed
+                       and mode == 'live')
             return {'outcome': 'verified' if matched else 'unverified', 'before': before,
                     'observation': after, 'persistence_verified': False, 'game_qualified': False}
         if request.operation == 'game.request_exit_menu':
@@ -252,6 +348,7 @@ class NativeAPI(object):
                     'save_choice_made': False, 'game_qualified': False}
         if request.operation == 'cas.enter':
             command = self._load('server_commands.cas_commands').modify_in_cas
+            fresh_context()
             target = self._load('server_commands.argument_helpers').OptionalTargetParam
             before, client = fresh_context()
             sim = self._services.sim_info_manager().get(int(arguments['sim_id']))
@@ -261,8 +358,13 @@ class NativeAPI(object):
                 raise NativeRefusal('CAS requires the exact instanced Sim in the admitted household.')
             # Provider must preserve relevant Sim/form/household transactions;
             # absence is a refusal, not permission to remove the original guards.
+            before, client = self._current_live_context(request, before)
             scope_request = _copy_request(request)
             with self._admission.cas_scope(scope_request, sim, client):
+                _check_admission_request(request, scope_request)
+                # Scope entry is a consequential callback. Its mode/context
+                # changes must not reach another game-code constructor.
+                before, client = self._current_live_context(request, before)
                 _check_admission_request(request, scope_request)
                 # Target construction can invoke game code. Keep it inside the
                 # admitted preservation scope and before the final fresh checks.
@@ -270,12 +372,14 @@ class NativeAPI(object):
                 _check_admission_request(request, scope_request)
                 current, current_client = self._before_mutation(request)
                 _check_admission_request(request, scope_request)
-                if not _same_live_context(before, current):
+                if not _same_running_context(before, current):
                     raise NativeRefusal('Native save/client context changed while preparing CAS entry.')
                 if (self._services.sim_info_manager().get(int(arguments['sim_id'])) is not sim
                         or _id(sim.id) != arguments['sim_id']
                         or sim.get_sim_instance() is not instance or _id(sim.household_id) != current['household_id']):
                     raise NativeRefusal('CAS target changed during preparation.')
+                current, current_client = self._current_live_context(request, current)
+                _check_admission_request(request, scope_request)
                 command(prepared_target, _connection=int(current['client_id']))
             return {'outcome': 'unverified', 'request': 'cas_entry', 'sim_id': arguments['sim_id'],
                     'cas_visibility_verified': False, 'save_persistence_verified': False, 'game_qualified': False}

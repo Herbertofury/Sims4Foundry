@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 810 tests collected, 796 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 842 tests collected, 828 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -467,3 +467,37 @@ CPython 3.7.17, then inspected a Deflate archive of timestamp, checked-hash and
 unchecked-hash results without importing or executing them. Their prefixes match
 the pinned reference fields. No real mod, installed game runtime or compatibility
 was tested. The combined local suite above passes; exact-head hosted CI is pending.
+
+At bytecode-report head c062d2e7a2e67d0d2ce52d7e697786c1c42af125, all six
+Windows/Linux Python 3.11/3.13/3.14 jobs passed in both push and PR workflows.
+The Windows 3.14 PR log explicitly passed all 27 new header-report tests: 810
+tests collected, 10 total skips. The isolated wheel passed existing smoke checks,
+the new CLI report, and all three actual CPython 3.7.17-compiled reference modes.
+No candidate code was imported, unmarshalled or executed during inspection.
+Wheel SHA-256:
+3bf54387ebefbe55e164a15be93be6e2f9b58acf7f8b45d6800709a565202065.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41839717233
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41839727419
+
+The native mode audit reproduced a source-contract gap with fabricated services
+on current Python and actual Python 3.7: unchanged running-zone/Build flags could
+produce a verified speed result after a hidden-mode change, even when generic
+admission checked Live before dispatch. This does not demonstrate that the same
+state combination occurs in the installed game. A separate fabricated mode hook
+also reproduced direct API reentrancy reaching two commands inside one outer call.
+
+The correction requires a typed, full-request/client-bound declaration from the
+same admission provider, correlated to a fresh opaque per-sample token. Generic
+permission cannot fabricate exact mode. Guards run before/after imports and around
+CAS preparation, including immediately after scope entry before target construction;
+post-mode native reads catch observed context changes, and speed
+verification uses the final clock rather than stale pre-callback data. A per-
+instance busy guard unwinds in finally. Post-speed missing/non-Live/invalid mode
+remains unverified and latches unresolved mutation without replay. Providers remain
+trusted, synchronous and separately unqualified; finite sampling is not atomic UI
+proof and the token is not authentication.
+
+Thirty-two new mode-boundary tests and the 45 original native tests pass. The direct
+Python 3.7 native/mode/queue/Build aggregate passes all 177 tests. Independent
+review and the complete local suite above pass; exact-head hosted CI is pending.
+No mode source, bootstrap, game install or game-facing execution was added.

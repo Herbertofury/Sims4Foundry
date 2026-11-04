@@ -236,7 +236,11 @@ loopback transport. Imports and construction start no server or hooks. Server an
 client default deny without independent host/peer authorization. Optional mutual
 HMAC peer hooks accept an explicitly provisioned session key; no key provisioning
 or production host policy is supplied. Tests use only public test keys, fabricated
-services and isolated sockets.
+services and isolated sockets. Native mutation additionally requires a fresh,
+request-bound exact-mode declaration from the same trusted admission provider.
+Running-zone/Build flags alone cannot establish Live mode; no qualified mode
+source ships. Post-speed mode loss remains unverified and blocks later queued
+mutations. These checks are non-atomic host assertions, not independent UI proof.
 They are not an installable mod or a working CAS/Build controller. See
 [COMPANION.md](docs/COMPANION.md) for implemented boundaries and missing integration.
 The unchanged v1 client protocol is wrapped by a separate schema-2 transport

@@ -29,12 +29,14 @@ Sims profile, connected to a running game, or used to alter a save.
   no reset exists, and started/unknown requests never requeue. Exhaustion refuses
   new work until a future host performs explicit, durable session reconciliation.
 - `companion-src/foundry_companion/native.py`: owner-thread-only observed status,
-  native clock-speed call plus independent readback, exact instanced-Sim CAS entry
+  native clock-speed call plus service readback, exact instanced-Sim CAS entry
   call behind an additional preservation scope, and ordinary quit-menu request.
   Admission denies by default. An explicit captured session/process-epoch binding
   is required even for observation; every mutation additionally requires exact
   zone/household/save context before reads or command imports. Command modules
-  load only after mutation/context admission, with another check afterward. CAS
+  load only after mutation/context admission and an explicit host mode declaration,
+  with another check after each import. Generic read/mutation permission and
+  `zone_running && !in_build_buy` cannot establish exact Live mode. CAS
   target construction is inside the preservation scope and precedes the final
   fresh context and exact Sim ID/object/instance/household checks. CAS visibility,
   save persistence and actual process exit are never inferred from a call returning.
@@ -88,14 +90,78 @@ admission also receives a detached observation with its own error map. Retained
 views cannot rewrite the adapter's previously checked baselines. A hook that
 changes the request view it is currently asked to admit is refused before work
 continues. After each mutation admission hook, one bounded fresh read must match
-the same running Live zone/household/client/save context. This catches accidental
-hook side effects without another admission call or an admission loop.
+the same running zone/household/client/save context. These primitive checks do not
+identify exact UI mode or exclude CAS/loading. Explicit mode observation follows,
+with one further native read to catch its ordinary context side effects. There
+is no recursive admission or mode-observation loop.
 CAS preservation receives a detached request but the actual Sim/client,
 then target preparation and fresh read/mutation admission occur inside the scope.
 Refusals and constructor/native errors unwind that scope; native errors are not
 retried. These local alias defenses are not a sandbox for untrusted Python hooks:
 services, command modules and preservation/admission providers remain trusted,
-independently reviewed integration code.
+independently reviewed integration code. A per-instance execution guard refuses
+direct callback reentrancy, including a mode provider calling `execute` again;
+`finally` cleanup releases that guard after exceptions. This is not a sandbox or
+permission to replay a previously started request.
+
+## Explicit native mode contract
+
+Every native mutation additionally requires the **same trusted admission object**
+to implement `observe_mode(request, observation, sample_token)`. It receives a
+fresh detached typed request, detached primitive observation with a separate error
+map, and a fresh opaque per-call object token. It must return exactly
+`HostModeDeclaration(request, client_id, sample_token, mode)`:
+
+- The returned request must match every value and exact TTL numeric type,
+  including operation/arguments, request/session IDs, process epoch and expected
+  zone/household/save context. Changing the input request view is also refused.
+- `client_id` must be the exact canonical string from the current native read.
+  The returned token must be the same object supplied for this invocation. A
+  cached declaration fails on a subsequent sample or another adapter instance.
+- `mode` must be an exact string from `live`, `cas`, `build_buy`, `loading`, `menu`
+  or `unknown`. Only `live` can admit a mutation. Missing observers, boolean
+  verdicts, malformed declarations, stale tokens and exceptions fail closed.
+
+The token only prevents accidental reuse; it does not authenticate a host or
+prove a fresh UI observation. Returning these fields is a **host assertion**, not
+new authority. Existing read/mutation admission, exact process/save bindings,
+CAS preservation and queue/journal safeguards all remain necessary. No
+installed-game source is currently qualified to supply this declaration, and no
+production implementation ships. Providers must establish exact current mode
+from a separately qualified source, never infer it from the two zone booleans,
+clock values, command return, generic admission, or a previous declaration.
+
+Mode observations run on the captured Thread object plus ident after generic
+admission and before any command-module import. They repeat after each import,
+after the initial Sim lookup before entering its preservation scope, immediately
+after scope entry before target construction, after target preparation, and after
+final target checks before dispatch. Each successful
+mode callback is followed by one bounded native context reread; changed client,
+zone, household, save or running/build flags prevent the next action. Native
+readers and the `require_read`, `require_mutation` and `observe_mode` callbacks must
+remain bounded, synchronous and free of dispatch, command imports, network/durable
+I/O or waits. In particular, the mode observer must be read-only:
+it must not change gameplay state, Sims/instances/households, UI mode or admission
+policy. Its final native reread does not revalidate every Sim field, so direct
+state replacement is outside this trusted provider contract. The declarations
+and native rereads are not atomic:
+a lying provider or an unobserved change-and-return between samples is not solved
+by correlation. Qualification and host lifecycle integration remain required.
+
+After the speed call, the adapter samples mode again and then reads native state
+again. Verification uses the **final** clock speed and unchanged native context,
+not the pre-callback speed. Missing, malformed, failed or non-Live post-call mode
+is `unverified`, even when the requested speed was observed. The result labels
+`observation.host_mode` with `mode_source: injected_host_declaration` and retains
+`game_qualified: false` and `persistence_verified: false`. Ordinary read-only
+`observe` does not invoke this provider or claim a gameplay mode.
+
+Mode failures before dispatch prevent subsequent imports, scopes and commands.
+They do not rewrite queue history: once the queue has published `started`, any
+adapter exception is conservatively `unknown`, even if this adapter refused
+before the command. Post-speed `unverified` and exceptions likewise latch the
+queue's unresolved mutation state. Neither the same ID nor a replacement ID is
+permission to retry; external durable reconciliation remains necessary.
 
 ## Integration still required
 
@@ -108,7 +174,8 @@ independently reviewed integration code.
 2. Owner-thread bootstrap and zone lifecycle hooks that coexist with other mods;
    no game API may run on a network worker. The source-only listener has an explicit
    caller-controlled lifecycle and no automatic startup hook or scheduling.
-3. CAS UI ownership and readback independent of gameplay Python availability,
+3. A qualified exact UI-mode observer for native mutations, plus CAS UI ownership
+   and readback independent of gameplay Python availability,
    with original native semantics and preservation. Build and menu providers are
    likewise missing. No generic cheat/raw-input fallback is exposed.
 4. Operation-specific observed evidence before protocol `verified`. Queue results

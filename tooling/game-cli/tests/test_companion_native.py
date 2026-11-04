@@ -11,7 +11,7 @@ import unittest
 SOURCE = Path(__file__).resolve().parents[1] / 'companion-src'
 if str(SOURCE) not in sys.path:
     sys.path.insert(0, str(SOURCE))
-from foundry_companion.native import NativeAPI, NativeRefusal, DenyAdmission
+from foundry_companion.native import NativeAPI, NativeRefusal, DenyAdmission, HostModeDeclaration
 from foundry_companion.queue import (Request, ObserveArguments, SetSpeedArguments,
                                      EnterCasArguments, RequestExitMenuArguments, ProcessEpoch,
                                      QueueError)
@@ -35,12 +35,16 @@ class Admission(DenyAdmission):
     def __init__(self):
         self.read = True; self.mutate = True; self.cas = False; self.enter = None; self.scopes = []
         self.calls = []
+        self.mode = 'live'; self.mode_calls = []
     def require_read(self, request):
         self.calls.append('read')
         return self.read
     def require_mutation(self, request, observation):
         self.calls.append('mutation')
         return self.mutate
+    def observe_mode(self, request, observation, sample_token):
+        self.mode_calls.append((request, observation, sample_token))
+        return HostModeDeclaration(request, observation['client_id'], sample_token, self.mode)
     @contextmanager
     def cas_scope(self, request, sim, client):
         self.calls.append('scope')
@@ -471,7 +475,7 @@ class NativeBindingTests(unittest.TestCase):
                 with self.subTest(operation=operation,change=index):
                     self.setUp();self.admission.cas=True
                     admissions=[]
-                    final_count=3 if operation=='cas.enter' else 2
+                    final_count=4 if operation=='cas.enter' else 2
                     def mutate(value,observation):
                         admissions.append(observation)
                         if len(admissions)==final_count:change()
@@ -500,7 +504,7 @@ class NativeBindingTests(unittest.TestCase):
             with self.subTest(operation=operation):
                 self.setUp();self.admission.cas=True
                 self.api.execute(request(operation))
-                admissions=3 if operation=='cas.enter' else 2
+                admissions=4 if operation=='cas.enter' else 2
                 if operation=='observe':
                     self.assertEqual(1,self.admission.calls.count('read'))
                     self.assertEqual(0,self.admission.calls.count('mutation'))
@@ -508,7 +512,7 @@ class NativeBindingTests(unittest.TestCase):
                 else:
                     self.assertEqual(admissions,self.admission.calls.count('read'))
                     self.assertEqual(admissions,self.admission.calls.count('mutation'))
-                    reads=2*admissions+(1 if operation=='live.set_speed' else 0)
+                    reads=3*admissions+(2 if operation=='live.set_speed' else 6 if operation=='cas.enter' else 0)
                     self.assertEqual(reads,self.service_reads.count('current_zone'))
 
     def test_unknown_native_speed_is_not_coerced(self):
@@ -587,11 +591,11 @@ class NativeBindingTests(unittest.TestCase):
         self.admission.cas=True
         def target(value):
             self.assertEqual(['enter'],self.admission.scopes)
-            self.assertEqual(['read','mutation','read','mutation','scope'],self.admission.calls)
+            self.assertEqual(['read','mutation','read','mutation','read','mutation','scope'],self.admission.calls)
             return ('target',value)
         self.modules['server_commands.argument_helpers'].OptionalTargetParam=target
         self.api.execute(request('cas.enter'))
-        self.assertEqual(['read','mutation','read','mutation','scope','read','mutation'],self.admission.calls)
+        self.assertEqual(['read','mutation','read','mutation','read','mutation','scope','read','mutation'],self.admission.calls)
         self.assertEqual([('cas',('target','30'),5)],self.commands)
         self.assertEqual(['enter','exit'],self.admission.scopes)
 
