@@ -167,6 +167,13 @@ For rotated logs, pass the predecessor first and current log last with two
 launcher and installed content IDs. It never guesses an edition, opens the launch
 URL, writes an account cache or authorizes a profile. The returned remaining gates
 must be completed by the future lifecycle adapter before any actual launch.
+All source extents are checked before reading: executable and launcher are each
+limited to 512 MiB, the manifest to 1 MiB, and each log read to its final 2 MiB
+plus one delimiter byte and an EOF-change probe. Hashes/readback stay within the
+original extents and reject observed source drift. Evidence hashes use exact
+selected request and success-record bytes, never replacement-decoded text. Log
+scanning retains only a 30-record predecessor window. These are ordinary concurrent
+change checks, not a hostile-filesystem snapshot or proof of launch authority.
 
 ## Passive Windows tooling
 

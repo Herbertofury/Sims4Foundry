@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 650 tests collected, 637 passed, 13 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 670 tests collected, 657 passed, 13 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -296,3 +296,28 @@ reproduced and prompted fixes for temporary receipt overhead and multibyte POSIX
 component limits.
 These limits apply to offline mod inventory/staging, not ZIP member names or the
 shared path helpers. Exact-head Windows CI remains required for this update.
+
+At bounded inventory head 6b5c54f169f7a5d88d24bad07bcbc13115352608, all four
+Windows/Linux Python 3.11/3.13 jobs passed in both push and pull-request workflows.
+An isolated archive of the exact committed source passed 650 tests with 13 native
+skips and the optional actual Python 3.7 integration enabled. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41826362465
+
+The launch-metadata audit reproduced hashing before size checks, unbounded binary
+hash reads, accepted growth during a small log read and a selected-record digest
+over replacement-decoded text rather than source bytes. Preflight now checks all
+regular-file extents before opening any source: 512 MiB per executable/launcher,
+1 MiB manifest and a 2 MiB tail per selected log. Reads stay within the captured
+extent plus an EOF probe; log tails additionally inspect one preceding delimiter
+byte. Same-API stamps and final bounded hashes reject observed drift. Windows
+cross-API identity uses explicit birth time where available, avoiding the known
+stat/fstat ctime mismatch without dropping same-API change checks.
+
+Selected request and successful-launch evidence are hashed as exact record bytes.
+Malformed UTF-8 cannot become selected evidence. Truncated leading tail records
+are discarded; unrelated malformed records retain their predecessor-window
+position. Lazy line iteration and a fixed 30-record deque prevent newline-count
+memory amplification while preserving latest-valid selection and rotation seams.
+Twenty new tiny-fixture tests plus the eight earlier launch cases pass, alongside
+independent review and the full local suite above. This remains read-only metadata
+preparation, not launch execution or authority. Exact-head Windows CI is pending.
