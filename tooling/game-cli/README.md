@@ -4,6 +4,9 @@ A mod-neutral home for Sims 4 automation, regression workflows and mod updates.
 This is an **offline-tested foundation, not a complete autonomous game controller**.
 No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqualified.
 
+For practical Apex/external CAS consumption and Modernize's established control
+paths, start with the [consumer handoff](docs/CONSUMER_HANDOFF.md).
+
 ## What works in this checkpoint
 
 - Installable Python CLI with structured JSON and nonzero refusal/error exits.
@@ -47,6 +50,9 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
 - A separate source-only Live read request path, binding one explicit actor and
   full context through the owner queue, strict receipt schema and intent journal.
   It uses a whole-read bound and remains uninstalled and default-denied.
+- A separate default-denied Live read sender, tested with authenticated synthetic
+  loopback fixtures and receipt-only recovery, including actual Python 3.7 peers.
+  It supplies no CLI live switch, production policy, credentials or game adapter.
 - Windows-only process/window identity inspection and pinned FFmpeg WGC capture
   implementations. Their native paths still need controlled Windows/game validation.
 
@@ -299,6 +305,9 @@ It has no targets, labels, native action dispatch or durable selection handles.
 The [request-bound Live route](docs/LIVE_READ_ROUTE.md) uses a separate strict
 schema and smaller whole-read limit through the owner queue and journal. It has
 no installed adapter or CLI network sender.
+The separate [Live read exchange](docs/LIVE_EXCHANGE.md) adds a low-level,
+one-shot host sender and synthetic authenticated recovery tests. It preserves
+the original complete intent without changing legacy wire or authentication.
 Exact mode and context come from trusted injected adapters; neither this seam nor
 fixture validation qualifies those adapters or establishes a real game outcome.
 

@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 1,043 tests collected, 1,029 passed, 14 Windows-only fixture tests skipped. Optional cross-runtime checks are reported as skipped when their configured reference interpreter is unavailable.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 1,084 tests collected, 1,070 passed, 14 Windows-only fixture tests skipped. Optional cross-runtime checks are reported as skipped when their configured reference interpreter is unavailable.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -680,3 +680,40 @@ contains no installable companion. It was built from production source at
 cade849f840d6e87065724470268bf2358a80603; subsequent portability corrections
 change only tests and this validation record. Wheel SHA-256:
 83b7b2a3ee5e4b8495c63d9f40ac9b16c8411c83ebce089105555e95060f0920.
+
+## Separate Live host exchange checkpoint
+
+The new `companion_live_transport` adds a low-level schema-3 sender; the preceding
+checkpoint did not have one. It leaves legacy transport, authentication, journal,
+owner queue and observer implementations unchanged. There is still no CLI live
+switch, production admission/key provider, installed listener or game validation.
+
+Forty-one new tests cover deterministic fake sockets and owned authenticated
+fixture peers. Eleven cases run an actual configured Python 3.7 child with its
+version checked and site imports/bytecode writes disabled. They cover accepted
+before owner execution, complete 49-row and whole-unavailable 50-row results,
+exact receipt reads, wrong authentication bindings, missing/invalid final
+confirmation, real reply loss/timeout, and a post-reply callback failure whose
+specific injected exception and prior milestones must be observed.
+
+The full local suite passes 1,084 collected cases with 14 Windows-only skips.
+The focused Live/auth/transport/journal/recovery run passes 289 collected cases
+with one Windows-only skip. Missing configured Python 3.7 results in explicit
+optional skips, not reference-runtime success. Journals retain only summary and
+digest, lost history never permits resubmission, and a Live read cannot resolve
+an earlier mutation's uncertainty. All readers and keys are fabricated.
+
+Independent review of this new host module found no blocking correctness issue:
+14 existing fake-socket tests and eight additional probe tests passed. It checked
+typed values, receipt/framing and deadline behavior plus owned-resource cleanup;
+it did not independently rerun authenticated sockets or Python 3.7 child suites.
+Exact-head hosted CI is pending. The earlier final independent owner/transport
+re-review remains incomplete and is not replaced by this separate feature's
+tests or review.
+
+The isolated no-site wheel built from
+fa3a6eb4c7e8613cdac5873c9963c83675f2901c passes the existing packaging smoke
+workflow plus default schema-3 sender denial before socket creation for both
+submit and receipt-read types. Actual Python 3.7 reference-header checks still
+pass. No companion is bundled or installed. Wheel SHA-256:
+a20d1f53fa715bd2eb51a3f51030a9c6eea45073d6b796603f6419c44f1e25ce.

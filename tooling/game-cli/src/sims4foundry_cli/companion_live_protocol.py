@@ -1,6 +1,8 @@
 """Explicit source-only schema-3 Live read values and strict receipt validation.
 
-No sender, CLI route, game provider, capability unlock or authentication change.
+This protocol module supplies no sender, CLI route or game provider. The separate
+companion_live_transport module adds a default-denied source-only sender without
+a capability unlock or authentication change.
 The full request digest correlates intent; it neither authenticates nor authorizes.
 The existing schema-1/2 types and network sender deliberately reject these types.
 """

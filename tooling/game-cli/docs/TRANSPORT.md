@@ -64,6 +64,10 @@ legacy parsing and the existing host `exchange_once` sender remain unchanged.
 The latter does not send v3. Source integration tests inject handler calls and
 owner ticks without starting sockets. No installed adapter or production policy
 is supplied, and authentication does not negotiate schema-3 capability.
+The separate `companion_live_transport.exchange_once` now supplies a default-denied
+schema-3 sender without changing the legacy sender. Its dedicated authenticated
+fixture and receipt-only recovery evidence is described in
+[LIVE_EXCHANGE.md](LIVE_EXCHANGE.md); it does not enable a CLI or real game host.
 
 Each TCP connection carries exactly one four-byte-big-endian-length-prefixed
 UTF-8 JSON object of 1 through 65,536 bytes. The client must half-close its write

@@ -147,8 +147,9 @@ status from its summary alone. No observation-body artifact store is added.
 Existing authentication is unchanged: it proves possession of a session key bound
 to declared session/epoch, socket endpoints and fresh nonces. It does not MAC or
 encrypt application payloads, supply operation permission, prove game identity,
-or establish schema-3 capability. This slice does not use it to introduce a new
-shipped sender or an installed listener.
+or establish schema-3 capability. A separate [Live read exchange](LIVE_EXCHANGE.md)
+now supplies a default-denied, one-shot host sender and authenticated synthetic
+fixture composition. It does not supply an installed listener or production policy.
 
 All integration evidence uses fabricated readers and explicitly injected policy.
 Inert construction, handler calls, owner ticks, codec roundtrips and journal

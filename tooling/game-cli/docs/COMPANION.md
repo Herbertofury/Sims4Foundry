@@ -22,6 +22,12 @@ Sims profile, connected to a running game, or used to alter a save.
   limits. It uses injected readers only; no native adapter, startup, CLI sender or
   live qualification is added. Legacy v1/v2 and authentication are unchanged.
   See [LIVE_READ_ROUTE.md](LIVE_READ_ROUTE.md).
+- `src/sims4foundry_cli/companion_live_transport.py`: a separate default-denied
+  schema-3 one-shot host exchange. It captures original intent before I/O and
+  keeps peer-policy and receipt-parser views separate. Authenticated fixtures
+  exercise only fabricated reads and original-bound receipt recovery, including
+  actual Python 3.7 children. No CLI or production integration is added. See
+  [LIVE_EXCHANGE.md](LIVE_EXCHANGE.md).
 - `companion-src/foundry_companion/peer_auth.py` and client `companion_auth.py`:
   optional mutual HMAC-SHA256 peer hooks with explicit caller-owned keys, fresh
   nonces, role separation and locally observed socket endpoint binding. No key
