@@ -4,6 +4,7 @@ from dataclasses import asdict
 import json
 import sys
 from . import __version__
+from . import neutral_testmods
 from . import apex, mods, windows, workflows, launch, discovery, package_resources, bytecode_headers, resource_diff
 from .catalog import CATALOG, capabilities
 from .engine import Session, create_session
@@ -101,6 +102,11 @@ def parser():
     stage.add_argument("--manifest", required=True)
     stage.add_argument("--destination", required=True)
     stage.add_argument("--execute", action="store_true", help="Copy into a new external staging directory, never a profile")
+    testmods = commands.add_parser("test-mods", help="Install, inspect, or retire a selected test-mod set")
+    testmods.add_argument("action", choices=("install", "retire", "status"))
+    testmods.add_argument("--session", required=True)
+    testmods.add_argument("--profile")
+    testmods.add_argument("--manifest")
     migration = commands.add_parser("apex-inventory", help="Parse existing Apex CLI without importing it or contacting the game")
     migration.add_argument("--repository", required=True)
     return parser
@@ -192,6 +198,14 @@ def run(args):
         if args.action == "compare":
             return mods.compare(read_json(args.before), read_json(args.after))
         return mods.stage(read_json(args.manifest), args.destination, args.execute)
+    if args.command == "test-mods":
+        if args.action == "status":
+            return neutral_testmods.status(args.session)
+        if args.action == "retire":
+            return neutral_testmods.retire(args.session)
+        if not args.manifest or not args.profile:
+            raise FoundryError("missing_arguments", "Install needs an explicit profile and inventory manifest.")
+        return neutral_testmods.install(read_json(args.manifest), args.profile, args.session)
     if args.command == "apex-inventory":
         return apex.inspect_source(args.repository)
     raise FoundryError("unsupported_command", "Unsupported command.")
