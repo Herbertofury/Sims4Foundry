@@ -49,3 +49,20 @@ input is not a safe background fallback:
 - [SendInput system input stream and UIPI](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)
 - [GetWindowThreadProcessId ownership query](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowthreadprocessid)
 - [PrintWindow synchronous behavior](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-printwindow)
+
+## Current external pointer source inspection
+
+The complete external pointer source was also read and byte-verified:
+`external_pointer.py` SHA-256
+`d8df2930835408334411e9f141a3d704e9dc32536eb75cca8f44136b90dfdcbd`.
+No helper or game-facing Windows class was executed. Foundry's backend-injected
+sequence runner preserves the key release rule: after a Down may have queued,
+attempt one Up to the same original process-owned HWND before optional evidence
+writes. Recorder/viewport failure must not suppress release; unverifiable/replaced
+ownership must never redirect it. Failed drag cleanup uses the last attempted
+point, not a future destination. Queue acceptance still is not a game result.
+
+The new packet module extends the construction contract to right click, bounded
+drag, navigation keys and screen-relative wheel coordinates using Microsoft
+message specifications. These are new implementations, not historically validated
+Sims controls. Text entry, held keyboard chords and arbitrary keys remain absent.

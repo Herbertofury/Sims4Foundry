@@ -14,6 +14,10 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
   filenames; before/after observations; OS-held exclusive workspace locks.
 - Real offline `.package` signature checks, bounded `.ts4script` ZIP/CRC checks,
   inventory/diff and verified copies into a new external staging directory.
+- Read-only EA launch metadata preparation using the exact installation and a
+  successful account Play record. It does not launch or write a cache.
+- Pure click/right-click, navigation-key, wheel and drag packet constructors plus
+  a backend-injected release-safe sequence runner. No native sender is exposed.
 - Source-only Apex migration inventory. It parses source without importing it.
 - Windows-only process/window identity inspection and pinned FFmpeg WGC capture
   implementations. Their native paths still need controlled Windows/game validation.
@@ -100,6 +104,18 @@ incomplete. There is no in-place install command in this checkpoint.
 DBPF checking is signature-only, not resource validation. ZIP checks do not prove
 Python/game-version compatibility, gameplay correctness or malware safety. Inventory
 files contain local source paths; keep them private unless reviewed for sharing.
+
+## Prepare an EA launch without executing it
+
+```sh
+foundry-game launch-plan --game-root "INSTALLATION_PATH" --ea-log "EA_LOG_PATH" --executable-sha256 "EXPECTED_GAME_SHA256" --output ./launch-metadata.json
+```
+
+For rotated logs, pass the predecessor first and current log last with two
+`--ea-log` arguments. This matches the successful Client Play record to the exact
+launcher and installed content IDs. It never guesses an edition, opens the launch
+URL, writes an account cache or authorizes a profile. The returned remaining gates
+must be completed by the future lifecycle adapter before any actual launch.
 
 ## Passive Windows tooling
 

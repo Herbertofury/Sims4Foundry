@@ -5,6 +5,8 @@ Its Sims-like image/class names only exercise strict identity checks. It is neve
 run on the user's desktop or treated as real gameplay/qualification evidence.
 """
 import os
+import ctypes
+from ctypes import wintypes
 from pathlib import Path
 import subprocess
 import tempfile
@@ -12,7 +14,9 @@ import time
 import unittest
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.io import sha256
-from sims4foundry_cli.windows import inspect
+from sims4foundry_cli.windows import inspect, same_identity
+from sims4foundry_cli.input_packets import (Point, ClientBounds, ScanCode, NavigationKey, encode_click,
+                                          encode_key_press, encode_wheel, encode_drag)
 
 CS = r'''
 using System;
@@ -37,8 +41,18 @@ class Fixture {
     [DllImport("user32.dll")] static extern IntPtr DispatchMessageW(ref MSG m);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h,int n);
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern IntPtr GetModuleHandleW(string name);
-    static Proc proc = DefWindowProcW;
+    static string events;
+    static IntPtr WindowProc(IntPtr h, uint m, IntPtr w, IntPtr l) {
+        if(events!=null && (m==0x100 || m==0x101 || (m>=0x200 && m<=0x20A))) {
+            File.AppendAllText(events,m.ToString()+","+w.ToInt64().ToString()+","+l.ToInt64().ToString()+"\n");
+            return IntPtr.Zero;
+        }
+        return DefWindowProcW(h,m,w,l);
+    }
+    static Proc proc = WindowProc;
     static void Main(string[] args) {
+        events=args[0]+".events";
+        File.WriteAllText(events,"");
         var instance = GetModuleHandleW(null);
         var c = new WC { proc=proc, instance=instance, name="Canvas-FoundryDisposableFixture" };
         if (RegisterClassW(ref c)==0) Environment.Exit(10);
@@ -87,6 +101,7 @@ class NativeFixtureTests(unittest.TestCase):
         while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertTrue(ready.exists(), "Synthetic window did not become ready")
+        self.events_path = Path(str(ready) + ".events")
         return process, int(ready.read_text())
 
     def test_exact_fixture_identity_with_real_win32_calls(self):
@@ -112,3 +127,44 @@ class NativeFixtureTests(unittest.TestCase):
         with self.assertRaises(FoundryError) as caught:
             inspect(process.pid, self.exe, self.checksum, hwnd)
         self.assertEqual("ambiguous_window", caught.exception.code)
+
+    def test_packet_delivery_on_owned_synthetic_window_only(self):
+        process, hwnd = self.start_fixture("packets")
+        original = inspect(process.pid, self.exe, self.checksum, hwnd)
+        user = ctypes.WinDLL("user32", use_last_error=True)
+        user.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user.PostMessageW.restype = wintypes.BOOL
+        user.GetForegroundWindow.restype = wintypes.HWND
+        user.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+        user.GetCursorPos.restype = wintypes.BOOL
+        foreground = user.GetForegroundWindow()
+        cursor = wintypes.POINT()
+        self.assertTrue(user.GetCursorPos(ctypes.byref(cursor)))
+        bounds = ClientBounds(original["client_width"], original["client_height"])
+        sequences = (
+            encode_click(Point(20,20), bounds),
+            encode_key_press(NavigationKey.ESCAPE, ScanCode(1,False)),
+            (encode_wheel(Point(-10,20), -120),),
+            encode_drag((Point(10,10),Point(15,15),Point(20,20)), bounds, duration_ms=20),
+        )
+        expected = []
+        baseline = self.events_path.read_text().splitlines()
+        for sequence in sequences:
+            same_identity(original, inspect(process.pid, self.exe, self.checksum, hwnd))
+            for packet in sequence:
+                # Exactly this newly compiled fixture's window. No game is present.
+                self.assertTrue(user.PostMessageW(hwnd,int(packet.message),packet.wparam,packet.lparam))
+                expected.append((int(packet.message),packet.wparam,packet.lparam))
+        deadline = time.monotonic() + 5
+        received = []
+        while time.monotonic() < deadline:
+            rows = self.events_path.read_text().splitlines()[len(baseline):]
+            received = [tuple(int(n) for n in row.split(",")) for row in rows if row.count(",")==2]
+            if len(received) >= len(expected): break
+            time.sleep(.02)
+        self.assertEqual(expected, received)
+        same_identity(original, inspect(process.pid,self.exe,self.checksum,hwnd))
+        self.assertEqual(foreground,user.GetForegroundWindow())
+        after = wintypes.POINT()
+        self.assertTrue(user.GetCursorPos(ctypes.byref(after)))
+        self.assertEqual((cursor.x,cursor.y),(after.x,after.y))

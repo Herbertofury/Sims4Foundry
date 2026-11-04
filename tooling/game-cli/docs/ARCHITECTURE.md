@@ -72,3 +72,25 @@ Prefer a small, mod-neutral Foundry in-game bridge for semantic native operation
 with a separately qualified external input adapter for menus and paths unavailable
 through native APIs. Never expose all Apex actions through an unvalidated generic
 command relay. The implementation and game tests for these providers are pending.
+
+## Input construction versus live dispatch
+
+`input_packets` constructs immutable allowlisted message plans; it never sends.
+`guarded_input` runs a plan only against an injected backend. There is no concrete
+Windows input backend or CLI input command in this release. Its test backends prove
+release/error ordering, not game support. Backend contracts require explicit True
+for recorder progress and current scan/layout/modifier verification, equal known
+integrity, an exact foreground baseline and fresh owned-window identity.
+
+The CI-only native fixture sends packets solely to a newly compiled owned fixture
+on a disposable hosted Windows runner. It checks message receipt and unchanged
+foreground/cursor. This is transport evidence for a synthetic window, not proof
+that Sims consumes the same packets or preserves gameplay/save state.
+
+The guarded runner records complete packet intent before input. While a button or
+key may be held, optional per-packet records remain in memory and flush only after
+release; journal stalls therefore cannot delay the matching Up. Every native
+backend operation must be bounded and the eventual host must supervise cleanup.
+The pure runner itself cannot guarantee release after a native hang or process
+termination. Runtime validation repeats timing, path-distance and wheel viewport
+limits so direct packet construction does not bypass encoder policy.

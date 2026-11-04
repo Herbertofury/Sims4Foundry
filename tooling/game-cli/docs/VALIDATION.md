@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- `python -m unittest discover -s tests -v`: 66 tests collected: 63 passed, 3 CI-only Windows fixture tests skipped.
+- `python -m unittest discover -s tests -v`: 107 tests collected: 103 passed, 4 CI-only Windows fixture tests skipped.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -17,10 +17,11 @@ source drift and verified staging copies, PID/HWND/geometry identity changes,
 helper pinning, post-capture identity changes, valid/truncated PNGs and CLI exits.
 
 The fake capture runner writes an actual fixture PNG. It does not launch FFmpeg.
-The native Windows APIs were not executed locally. Three additional CI-only tests
+The native Windows APIs were not executed locally. Four additional CI-only tests
 compile a tiny synthetic Canvas-window application on GitHub's disposable Windows
 runners and exercise the actual query-only Win32 bindings, ambiguity rejection and
-minimized-window rejection. This fixture is not Sims and never runs on the user's
+minimized-window rejection. One fixture also receives the encoded mouse/key/wheel/drag
+messages and checks that sending them does not change foreground or OS cursor. This fixture is not Sims and never runs on the user's
 desktop. Windows CI does not constitute a real-game test. No launcher, profile mutation, input, save or exit
 validation took place. See QUALIFICATION.md for all outstanding live gates.
 
@@ -36,3 +37,14 @@ the validator checks ZipInfo.orig_filename before any normalized alias. A separa
 regression test simulates Windows sanitization on every platform. Cross-platform rerun is
 required for the new source head. Strict terminal-result validation and empty-intent
 crash recovery also have dedicated regression tests.
+
+At remote head 216e4dbd894eaa0437b07811e11c8928a3d7356a, all four Linux/Windows
+Python 3.11/3.13 jobs passed, including three actual Win32 query tests against a
+compiled synthetic fixture. Later additions (metadata-only launch preparation,
+packet construction, backend-injected release guards and fixture message delivery)
+require a fresh CI pass. No real game input was sent.
+
+A later future-sender review added regression coverage for stale guards across
+journal I/O, signed wheel targeting, direct-packet timing/path limits and deferring
+optional journal records until paired release. Native backend calls must still be
+bounded; the backend-injected runner cannot supervise a hung native call.

@@ -3,7 +3,7 @@ import argparse
 import json
 import sys
 from . import __version__
-from . import apex, mods, windows, workflows
+from . import apex, mods, windows, workflows, launch
 from .catalog import CATALOG, capabilities
 from .engine import Session, create_session
 from .errors import FoundryError
@@ -36,6 +36,11 @@ def parser():
     flow.add_argument("action", choices=("validate", "run"))
     flow.add_argument("--file", required=True)
     flow.add_argument("--session")
+    launch_plan = commands.add_parser("launch-plan", help="Read-only EA metadata preparation; does not launch")
+    launch_plan.add_argument("--game-root", required=True)
+    launch_plan.add_argument("--ea-log", required=True, action="append", help="One or two logs in chronological order")
+    launch_plan.add_argument("--executable-sha256", required=True)
+    launch_plan.add_argument("--output")
     inspect = commands.add_parser("inspect", help="Passive, exact Windows process/window identity only")
     inspect.add_argument("--pid", required=True, type=int)
     inspect.add_argument("--executable", required=True)
@@ -86,6 +91,11 @@ def run(args):
         if not args.session:
             raise FoundryError("session_required", "Workflow run needs an explicit synthetic session directory.")
         return workflows.run(value, args.session)
+    if args.command == "launch-plan":
+        result = launch.prepare(args.game_root, args.ea_log, args.executable_sha256)
+        if args.output:
+            new_json(external_path(args.output), result)
+        return result
     if args.command == "inspect":
         result = windows.inspect(args.pid, args.executable, args.executable_sha256, args.hwnd)
         if args.output:
