@@ -1,4 +1,5 @@
 import hashlib
+from contextlib import chdir
 import json
 import os
 from datetime import datetime, timezone
@@ -379,12 +380,15 @@ class NeutralLaunchTests(unittest.TestCase):
 
     def test_relative_game_root_uses_recorded_absolute_identity(self):
         absolute = self.game
-        self.game = Path(os.path.relpath(absolute))
         seen = []
         def observe(executable, checksum):
             seen.append(executable)
             return self.observed
-        self.execute(discover_fn=observe)
+        # Hosted Windows places the checkout and temporary fixtures on
+        # different drives. Exercise a genuinely relative same-drive path.
+        with chdir(self.root):
+            self.game = Path(absolute.name)
+            self.execute(discover_fn=observe)
         context = json.loads((self.launch_session / 'ea-context-intent.json').read_text())
         self.assertEqual(str(absolute / 'Game' / 'Bin' / 'TS4_Launcher_x64.exe'), context['expected']['launcher'])
         self.assertEqual([str(absolute / 'Game' / 'Bin' / 'TS4_x64.exe')], seen)

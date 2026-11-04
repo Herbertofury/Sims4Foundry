@@ -914,4 +914,13 @@ outside the cooperating-command guarantee. An interrupted test-mod retirement
 has status reporting but no resume command in this checkpoint. Native EA,
 Windows UI Automation and actual game orchestration are not qualified. This
 review does not complete the older denied final owner/transport review.
-Exact-head CI for this new integration is pending.
+The first exact-head integration CI at
+`48d68c353f3a521982b0555dcaba2ff4678ca008` passed the Ubuntu jobs, but Windows
+reported two fixture assumptions: replacing an open owned executable was denied
+by Windows sharing rules, and a relative-path test crossed the runner's C:/D:
+drives. The test fix retains refusal and unchanged-byte checks for that sharing
+denial, with no retry, and exercises a genuinely relative path from an owned
+same-drive working directory. No production source changed. Independent review
+verified both test diffs. Exact-head CI for the correction is pending.
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41891383771
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41891369606

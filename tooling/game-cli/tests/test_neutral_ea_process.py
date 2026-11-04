@@ -67,6 +67,7 @@ class EaProcessTests(unittest.TestCase):
             with self.assertRaises(FoundryError) as caught:
                 neutral_ea_process.stable_executable(self.image)
         self.assertEqual('ea_image_changed', caught.exception.code)
+        before_replacement = self.image.read_bytes()
         changed[0] = False
         def replace(fd, count):
             result = real_read(fd, count)
@@ -77,7 +78,15 @@ class EaProcessTests(unittest.TestCase):
                 replacement.replace(self.image)
             return result
         with patch.object(neutral_ea_process, '_read', side_effect=replace):
-            with self.assertRaises(FoundryError): neutral_ea_process.stable_executable(self.image)
+            with self.assertRaises((FoundryError, PermissionError)) as caught:
+                neutral_ea_process.stable_executable(self.image)
+        self.assertTrue(changed[0])
+        if isinstance(caught.exception, PermissionError):
+            # Windows can deny replacement of an open executable. That stops
+            # the read without fallback; do not retry/bypass the denied move.
+            self.assertEqual(before_replacement, self.image.read_bytes())
+        else:
+            self.assertEqual('ea_image_changed', caught.exception.code)
         with self.image.open('r+b') as stream: stream.truncate(1024*1024*1024)
         with patch.object(neutral_ea_process, '_read', side_effect=AssertionError('unexpected read')):
             with self.assertRaises(FoundryError) as caught:
