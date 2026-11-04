@@ -50,12 +50,16 @@ class Operation:
             if not VALIDATORS[kind](args[key]):
                 raise FoundryError("invalid_argument", "Semantic argument failed its type/range check.", argument=key, expected=kind)
 
-    def public(self, backend):
-        return {"operation": self.name, "allowed_states": self.states, "arguments": self.arguments,
+    def public(self, backend, source_details=False):
+        result = {"operation": self.name, "allowed_states": self.states, "arguments": self.arguments,
                 "effect": self.effect, "destructive": self.destructive,
                 "availability": "simulation_only" if backend == "simulation" else "unqualified",
                 "live_qualified": False,
                 "blocker": None if backend == "simulation" else "No independently qualified no-Apex semantic adapter is installed."}
+        if source_details:
+            from .source_map import operation_source
+            result["migration_source"] = operation_source(self.name)
+        return result
 
 
 def op(name, states, args=None, effect="edit", destructive=False):
@@ -116,11 +120,11 @@ def get_operation(name):
         raise FoundryError("unsupported_operation", "No raw-input fallback exists for this operation.", operation=name) from exc
 
 
-def capabilities(backend="windows"):
+def capabilities(backend="windows", source_details=False):
     if backend not in ("windows", "simulation"):
         raise FoundryError("unsupported_backend", "Choose windows or simulation.")
     return {"ok": True, "backend": backend, "schema": 1, "real_game_control_ready": False,
-            "operations": [item.public(backend) for item in _ITEMS],
+            "operations": [item.public(backend, source_details) for item in _ITEMS],
             "passive_windows_inspection": True, "offline_mod_tools": True,
             "limitations": ["Simulation results never qualify a real operation.",
                             "Launch may activate the game window; it is not non-disruptive.",

@@ -3,7 +3,7 @@ import argparse
 import json
 import sys
 from . import __version__
-from . import apex, mods, windows, workflows, launch, discovery
+from . import apex, mods, windows, workflows, launch, discovery, package_resources
 from .catalog import CATALOG, capabilities
 from .engine import Session, create_session
 from .errors import FoundryError
@@ -16,6 +16,7 @@ def parser():
     commands = parser.add_subparsers(dest="command", required=True)
     cap = commands.add_parser("capabilities", help="Distinguish simulated contracts from real qualified controls")
     cap.add_argument("--backend", choices=("windows", "simulation"), default="windows")
+    cap.add_argument("--source-details", action="store_true", help="Include bounded source-review lineage, never live qualification")
     session = commands.add_parser("session")
     session.add_argument("action", choices=("create", "status", "observe"))
     session.add_argument("--directory", required=True)
@@ -63,6 +64,12 @@ def parser():
     inv.add_argument("--output")
     check = sub.add_parser("check")
     check.add_argument("--file", required=True)
+    resources = sub.add_parser("resources", help="Read a bounded DBPF 2.1 resource index; no body extraction")
+    resources.add_argument("--file", required=True)
+    resources.add_argument("--output")
+    overlaps = sub.add_parser("overlaps", help="Report shared resource keys without guessing load order or compatibility")
+    overlaps.add_argument("--file", action="append", required=True)
+    overlaps.add_argument("--output")
     compare = sub.add_parser("compare")
     compare.add_argument("--before", required=True)
     compare.add_argument("--after", required=True)
@@ -77,7 +84,7 @@ def parser():
 
 def run(args):
     if args.command == "capabilities":
-        return capabilities(args.backend)
+        return capabilities(args.backend, args.source_details)
     if args.command == "session":
         if args.action == "create":
             return create_session(args.directory, args.backend)
@@ -113,6 +120,12 @@ def run(args):
     if args.command == "capture":
         return windows.capture(read_json(args.identity), args.ffmpeg, args.ffmpeg_sha256, args.destination)
     if args.command == "mods":
+        if args.action in ("resources", "overlaps"):
+            result = (package_resources.inspect_resources(args.file) if args.action == "resources"
+                      else package_resources.audit_overlaps(args.file))
+            if args.output:
+                new_json(external_path(args.output), result)
+            return result
         if args.action == "check":
             return {"ok": True, "artifact": mods.inspect_artifact(args.file), "code_executed": False}
         if args.action == "inventory":

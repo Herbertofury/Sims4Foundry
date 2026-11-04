@@ -143,6 +143,25 @@ class CLITests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertFalse(result["real_game_control_ready"])
 
+    def test_source_details_do_not_enable_dispatch(self):
+        code, result = self.call(["capabilities", "--source-details"])
+        self.assertEqual(0, code)
+        self.assertEqual(45, len(result["operations"]))
+        for operation in result["operations"]:
+            self.assertFalse(operation["migration_source"]["live_qualified"])
+            self.assertFalse(operation["migration_source"]["dispatch_available"])
+
+    def test_resource_and_overlap_routes_are_read_only(self):
+        payload = {"ok": True, "game_modified": False, "compatibility_verified": False}
+        with mock.patch("sims4foundry_cli.cli.package_resources.inspect_resources", return_value=payload) as provider:
+            code, result = self.call(["mods", "resources", "--file", "one.package"])
+        provider.assert_called_once_with("one.package")
+        self.assertEqual((0, payload), (code, result))
+        with mock.patch("sims4foundry_cli.cli.package_resources.audit_overlaps", return_value=payload) as provider:
+            code, result = self.call(["mods", "overlaps", "--file", "one.package", "--file", "two.package"])
+        provider.assert_called_once_with(["one.package", "two.package"])
+        self.assertEqual((0, payload), (code, result))
+
     def test_discovery_routes_only_to_passive_provider(self):
         result = {"ok": True, "status": "none_observed", "launch_qualified": False,
                   "real_game_control_ready": False, "input_sent": False, "absence_proven": False}

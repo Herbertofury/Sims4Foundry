@@ -66,3 +66,25 @@ The new packet module extends the construction contract to right click, bounded
 drag, navigation keys and screen-relative wheel coordinates using Microsoft
 message specifications. These are new implementations, not historically validated
 Sims controls. Text entry, held keyboard chords and arbitrary keys remain absent.
+
+## Bounded per-operation source map
+
+`capabilities --source-details` maps all 45 desired operations to the inspected
+source evidence: 14 have inspected call sites, four have Apex-only paths, and 27
+were not identified in the bounded review. Even the first two categories have
+only partial coverage of Foundry's desired contracts and no live qualification.
+The exported map contains source-relative references and derived facts, not copied
+helper modules, private desktop paths or game/account data.
+
+The map preserves several essential distinctions: accept-continuation cancellation
+is not ordinary CAS cancellation; generic modifiers are not a proven hue control;
+physique setters take one parameter at a time; voice calls need actor/range binding;
+undo/redo result changes do not identify an intended history action; and custom CAS
+acceptance does not prove disk persistence. Occult-cache mutation, owner conversion,
+wing-selection and first-tattoo paths remain quarantined. Current CAS getters may
+also mutate caches, so read-only intent requires independent validation.
+
+The resource-index audit can identify exact competing package owners before a
+future UI integration. It cannot select the right override, merge it, establish
+load order, or qualify the current installed game version. Use only reviewed,
+explicitly selected packages and retain a single authorized UI resource owner.

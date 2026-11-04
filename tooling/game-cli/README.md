@@ -14,11 +14,15 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
   filenames; before/after observations; OS-held exclusive workspace locks.
 - Real offline `.package` signature checks, bounded `.ts4script` ZIP/CRC checks,
   inventory/diff and verified copies into a new external staging directory.
+- Bounded DBPF 2.1 resource-index inspection and exact type/group/instance
+  overlap reports for explicitly selected packages, without extracting resources.
 - Read-only EA launch metadata preparation using the exact installation and a
   successful account Play record. It does not launch or write a cache.
 - Pure click/right-click, navigation-key, wheel and drag packet constructors plus
   a backend-injected release-safe sequence runner. No native sender is exposed.
 - Source-only Apex migration inventory. It parses source without importing it.
+- Optional source-backed operation map that distinguishes inspected call sites,
+  Apex-only paths and gaps in the bounded review; it grants no live capability.
 - Windows-only process/window identity inspection and pinned FFmpeg WGC capture
   implementations. Their native paths still need controlled Windows/game validation.
 
@@ -101,9 +105,26 @@ directory, rechecks source hashes, preserves the sources, and writes a completio
 receipt only after every copy matches. An interrupted tree without that receipt is
 incomplete. There is no in-place install command in this checkpoint.
 
-DBPF checking is signature-only, not resource validation. ZIP checks do not prove
+`mods check` remains signature-only for DBPF packages. For deeper read-only
+inspection of a supported DBPF 2.1 index, use:
+
+```sh
+foundry-game mods resources --file ./candidate/Example.package --output ./resources.json
+foundry-game mods overlaps --file ./candidate/Example.package --file ./candidate/Other.package --output ./overlaps.json
+```
+
+The parser accepts a deliberately narrow, documented layout and refuses unknown
+versions, flags, compression markers, deleted/duplicate keys and overlapping
+extents. Resource bodies are hashed opaquely, never interpreted or decompressed.
+Auditing is bounded to 128 packages, 1 GiB of source bytes and 16,384 entries.
+Repeated exact type/group/instance keys identify competing resource owners, not
+load order or a safe merge. Only equal whole-package hashes establish identical
+package bytes; equal resource metadata does not establish equal resource bodies.
+
+ZIP checks do not prove
 Python/game-version compatibility, gameplay correctness or malware safety. Inventory
-files contain local source paths; keep them private unless reviewed for sharing.
+and resource reports contain local source paths; keep them private unless reviewed
+for sharing.
 
 ## Prepare an EA launch without executing it
 
@@ -169,3 +190,14 @@ An `ok: true` report means the inspection returned a complete report, not that i
 `status` is actionable. Neither `none_observed` nor one matching identity proves
 absence, grants launch admission, acquires a lease or qualifies game control.
 See [UI_ADAPTER.md](docs/UI_ADAPTER.md) for the inspected CAS/Build provider limits.
+
+## Inspect the source-backed operation map
+
+`foundry-game capabilities --source-details` includes the reviewed legacy/native
+call names, relative source references, missing contract requirements and readback
+limits for all 45 desired operations. This is source lineage, not a dispatcher or
+permission to use the old code. Every real operation remains unqualified. In
+particular, an accept-continuation cancellation is not ordinary CAS cancellation,
+an observed Build/Buy boolean is not a Build editor, and a CAS transition is not
+verified on-disk persistence. The bounded review does not establish repository-wide
+absence of operations it did not identify.
