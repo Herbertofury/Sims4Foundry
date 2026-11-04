@@ -70,7 +70,9 @@ with the [consumer handoff](docs/CONSUMER_HANDOFF.md).
   orchestration remains unqualified; uncertain handoffs are never replayed.
 - Explicit Windows [test-mod install/status/retire](docs/TEST_MODS.md) for a selected
   flat artifact set and authorized closed profile. It preserves unrelated mods,
-  records intent and moves retired test bytes without deletion. Fixture-tested,
+  records intent and moves retired test bytes without deletion. Explicit recovery
+  can complete only an unambiguous interrupted retirement without replaying a
+  completed move. Fixture-tested,
   not a game-loading or clean-profile qualification.
 
 ## What does not work yet

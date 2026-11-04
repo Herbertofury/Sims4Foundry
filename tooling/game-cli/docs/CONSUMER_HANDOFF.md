@@ -39,7 +39,10 @@ are not imported, executed, decoded or installed by these inspection commands.
 
 The separately scoped Windows `test-mods install/status/retire` commands can
 install an explicitly selected test set into an authorized closed profile and
-move it out without deleting its bytes. They preserve existing mods and do not
+move it out without deleting its bytes. `test-mods recover-retirement` can finish
+an interrupted retirement only from exact preserved receipts and current
+directory/content identities, without replaying a completed move. They preserve
+existing mods and do not
 create a clean profile, establish session ownership or prove game loading. Use
 [TEST_MODS.md](TEST_MODS.md) for the exact commands, record handling and limits.
 

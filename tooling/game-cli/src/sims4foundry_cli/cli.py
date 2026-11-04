@@ -5,6 +5,7 @@ import json
 import sys
 from . import __version__
 from . import neutral_testmods, neutral_profile, neutral_launch, neutral_ea_consent, neutral_launch_recovery, neutral_records
+from . import neutral_testmod_recovery
 from . import apex, mods, windows, workflows, launch, discovery, package_resources, bytecode_headers, resource_diff
 from .catalog import CATALOG, capabilities
 from .engine import Session, create_session
@@ -140,7 +141,7 @@ def parser():
     profile.add_argument("--session", required=True)
     profile.add_argument("--profile")
     testmods = commands.add_parser("test-mods", help="Install, inspect, or retire a selected test-mod set")
-    testmods.add_argument("action", choices=("install", "retire", "status"))
+    testmods.add_argument("action", choices=("install", "retire", "recover-retirement", "status"))
     testmods.add_argument("--session", required=True)
     testmods.add_argument("--profile")
     testmods.add_argument("--profile-session", help="Exact activation session required for a Foundry-marked profile")
@@ -271,6 +272,10 @@ def run(args):
             return neutral_testmods.status(args.session)
         if args.action == "retire":
             return neutral_testmods.retire(args.session)
+        if args.action == "recover-retirement":
+            if args.profile_session is not None:
+                raise FoundryError("invalid_arguments", "Recovery uses the stored activation binding, not a supplied override.")
+            return neutral_testmod_recovery.recover_retirement(args.session)
         if not args.manifest or not args.profile:
             raise FoundryError("missing_arguments", "Install needs an explicit profile and inventory manifest.")
         return neutral_testmods.install(neutral_records.read_json(args.manifest), args.profile, args.session,

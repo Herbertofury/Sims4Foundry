@@ -10,6 +10,7 @@ foundry-game mods inventory --directory SOURCE --output INVENTORY.json
 foundry-game test-mods install --manifest INVENTORY.json --profile PROFILE --session NEW_SESSION_DIRECTORY
 foundry-game test-mods status --session NEW_SESSION_DIRECTORY
 foundry-game test-mods retire --session NEW_SESSION_DIRECTORY
+foundry-game test-mods recover-retirement --session NEW_SESSION_DIRECTORY
 ```
 
 Use only a profile the current task is authorized to change, with no active
@@ -83,3 +84,23 @@ never-dispatched request may proceed. Supplied/stored binding with a missing or
 corrupt marker fails; an intact Foundry marker without a binding also fails.
 Arbitrary external deletion of all provenance is outside the cooperating-command
 model; this does not turn markers into an authentication boundary.
+
+## Explicit interrupted-retirement recovery
+
+`recover-retirement` requires the matching original install intent, completion,
+retirement intent and current identity sidecar. It holds the same profile lock,
+uses the stored activation binding, and refuses pending launches, changed files,
+changed directories, staging leftovers, or both/neither possible locations.
+There is no profile-session override.
+
+If the exact unchanged folder remains in Mods, recovery can finish the single
+move after fresh process and evidence checks. If the exact folder already moved,
+it records completion without moving again. Repeating a completed recovery
+rechecks current evidence, identities, content and process state without rewriting
+receipts. Access failures or changed post-move evidence leave an unresolved
+result and preserve every file and receipt. A failed acknowledgment never proves
+that a move did not occur.
+
+Twenty-six owned fixtures and seven independent adversarial probes cover this
+recovery path. Two CLI routing fixtures check the exact stored-session call and
+refuse a binding override. These are not real-game or native Windows qualification.

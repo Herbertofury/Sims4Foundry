@@ -921,6 +921,31 @@ by Windows sharing rules, and a relative-path test crossed the runner's C:/D:
 drives. The test fix retains refusal and unchanged-byte checks for that sharing
 denial, with no retry, and exercises a genuinely relative path from an owned
 same-drive working directory. No production source changed. Independent review
-verified both test diffs. Exact-head CI for the correction is pending.
+verified both test diffs. All six jobs in both exact-head correction workflows
+passed at `70a6bee0208307666727c93f72509ee4c0c75637`, including the formerly failing
+Windows fixtures. The Windows 3.14 job collected 1,517 tests with 38 expected
+platform/runtime skips; this validates owned Windows fixtures, not game behavior.
+Corrected PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41892354871
+Corrected push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41892344063
 PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41891383771
 Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41891369606
+
+
+## Interrupted test-mod retirement recovery
+
+An explicit recovery path now handles a proven pre-move retirement and a proven
+post-move receipt loss. It preserves receipts, uses the shared lock and stored
+profile binding, rejects pending launches and ambiguous locations, rechecks
+content/identities around process scans, and never repeats a move solely because
+its acknowledgment failed. The prior checkpoint's missing retirement resume path
+is addressed by this addition; arbitrary external-race limits are unchanged.
+
+All 26 focused owned-file/fake-process fixtures passed. Independent read-only
+review passed those tests and seven extra adversarial probes, including partial
+completion, post-move identity/binding changes, and repeated-completion late
+changes. CLI routing has two additional fixtures. No native/game/profile-user
+action occurred. The complete configured local suite collected 1,545 tests:
+1,529 passed and 16 Windows-only fixtures skipped. The rebuilt installed wheel
+passed 224 isolated no-site checks, with all 46 Python archive members matching
+source. Wheel SHA-256: `6da1ee9b29979dc22bef5b40487dbfb8cf6b14feeb8d1ab33498c1b8e5a87ed9`;
+size: 172,433 bytes. Exact-head CI for retirement recovery is pending.
