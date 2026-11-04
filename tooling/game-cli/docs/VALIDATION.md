@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 753 tests collected, 739 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 783 tests collected, 769 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -410,3 +410,31 @@ without claiming to reproduce the historical Windows cause. The short case stays
 uncertain with one dispatch and no replay. Production limits, journal behavior
 and cleanup remain unchanged. All 17 recovery cases, including actual Python 3.7
 subprocesses, and the full local suite above pass. Exact-head hosted CI is pending.
+
+At recovery-fixture head 7638a95a512edea05bea14f5dec6a0c585a4248f, all six
+Windows/Linux Python 3.11/3.13/3.14 jobs passed in both push and pull-request
+workflows. The Windows 3.11 PR log explicitly passed the formerly failing
+receipt-recovery case and all three new diagnostic/deadline regressions.
+Windows collected 753 tests with nine skips; the local run above used actual
+Python 3.7 for the optional subprocess fixtures. Runtime source was identical
+to the preceding wheel checkpoint; this correction changed tests and docs only.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41834125645
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41834135907
+
+The script-archive preflight adds 30 tiny-fixture tests. A three-entry ZIP
+reproduces the original stdlib allocation order before a caller count limit.
+The correction bounds the central directory to 4 MiB and counts at most 4,096
+actual records before constructing ZipInfo objects. Immutable validated metadata
+and a same-handle fixed-length view keep a changed directory/EOF from reopening
+that allocation gap. Stored and Deflate are the deliberately supported methods;
+ZIP64 central/end metadata, split disks and inferred offsets are refused. A
+local-only ZIP64 header with bounded classic central metadata remains supported.
+
+Independent review also reproduced malformed Deflate escaping as raw zlib.error;
+a tiny invalid-block regression now verifies a static structured refusal. Tests
+cover dishonest counts, exact/one-over bounds, malformed metadata, source drift,
+short reads, unsupported decompressors and retained staging behavior. The full
+local suite above passes with actual Python 3.7 subprocess fixtures enabled.
+This checks fabricated archives without extraction or execution, not game
+compatibility or malware safety. Exact-head hosted CI is pending. See
+[SCRIPT_ARCHIVE.md](SCRIPT_ARCHIVE.md) for format and concurrent-writer limits.

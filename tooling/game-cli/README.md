@@ -12,8 +12,9 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
   interruption and read-only reconciliation. This is not Sims emulation.
 - Hash-bound, expiring plans; one dispatch per operation ID; immutable intent/result
   filenames; before/after observations; OS-held exclusive workspace locks.
-- Real offline `.package` signature checks, bounded `.ts4script` ZIP/CRC checks,
-  inventory/diff and verified copies into a new external staging directory.
+- Real offline `.package` signature checks, [bounded `.ts4script` ZIP/CRC checks](docs/SCRIPT_ARCHIVE.md)
+  with metadata limits before stdlib allocation, inventory/diff and verified copies
+  into a new external staging directory. Stored/Deflate is the deliberate subset.
 - Bounded DBPF 2.1 resource-index inspection and exact type/group/instance
   overlap reports for explicitly selected packages, without extracting resources.
 - Read-only EA launch metadata preparation using the exact installation and a

@@ -7,13 +7,26 @@ import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import stat
+import struct
 import zipfile
+try:
+    import zlib
+except ImportError:  # Preserve stored-only inspection on Python without zlib.
+    zlib = None
 from .errors import FoundryError
 from .io import (digest, exact_fields, exact_int, external_path, new_json,
                  plain_path, safe_relative)
 
 MAX_ARTIFACT = 512 * 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
+MAX_SCRIPT_ENTRIES = 4096
+MAX_SCRIPT_METADATA_BYTES = 4 * 1024 * 1024
+_ZIP_END_BYTES = 22
+_ZIP_COMMENT_BYTES = 65535
+_ZIP_CENTRAL_BYTES = 46
+_SCRIPT_ZIP_ERRORS = (zipfile.BadZipFile, RuntimeError, NotImplementedError, UnicodeError)
+if zlib is not None:
+    _SCRIPT_ZIP_ERRORS += (zlib.error,)
 MAX_INVENTORY_ARTIFACTS = 4096
 # Count every entry below the selected root, including irrelevant files and
 # directories. Root depth is zero; at most 32 nested directories are scanned.
@@ -99,6 +112,150 @@ def _copy_artifact(source, target, expected_size):
         target.write(chunk)
 
 
+def _script_size(stream, expected_size):
+    stream.seek(0, os.SEEK_END)
+    if stream.tell() != expected_size:
+        raise FoundryError("artifact_changed", "Script archive size changed during inspection.")
+
+
+def _script_read_at(stream, offset, length):
+    """Read a previously bounded metadata extent, never follow a growing EOF."""
+    stream.seek(offset)
+    data, position = bytearray(length), 0
+    while position < length:
+        chunk = stream.read(min(length - position, READ_CHUNK_BYTES))
+        if not chunk:
+            raise FoundryError("artifact_changed", "Script archive was truncated during inspection.")
+        data[position:position + len(chunk)] = chunk
+        position += len(chunk)
+    return bytes(data)
+
+
+class _ScriptArchiveView:
+    """Fixed extent with frozen, preflighted metadata for the stdlib parser.
+
+    Local headers/payload stay on the same open source handle. Neither growing
+    EOF nor replacement metadata can enlarge a later ZipFile allocation. This
+    is not an atomic snapshot or protection against a hostile filesystem.
+    """
+    def __init__(self, stream, size, metadata_offset, metadata):
+        self.stream, self.size = stream, size
+        self.metadata_offset, self.metadata = metadata_offset, metadata
+        self.position = 0
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self.position
+
+    def seek(self, offset, whence=os.SEEK_SET):
+        if whence == os.SEEK_CUR:
+            offset += self.position
+        elif whence == os.SEEK_END:
+            offset += self.size
+        elif whence != os.SEEK_SET:
+            raise ValueError("Invalid archive seek mode")
+        if not 0 <= offset <= self.size:
+            raise zipfile.BadZipFile("Archive seek exceeds the inspected extent")
+        self.position = offset
+        return offset
+
+    def read(self, size=-1):
+        remaining = self.size - self.position
+        size = remaining if size is None or size < 0 else min(size, remaining)
+        # Even an unexpected stdlib read-to-EOF is bounded before allocation.
+        maximum = max(READ_CHUNK_BYTES,
+                      MAX_SCRIPT_METADATA_BYTES + _ZIP_END_BYTES + _ZIP_COMMENT_BYTES)
+        if size > maximum:
+            raise FoundryError("archive_bounds", "Script archive read exceeds its metadata/read bound.")
+        prefix = b""
+        if self.position < self.metadata_offset:
+            count = min(size, self.metadata_offset - self.position)
+            prefix = _script_read_at(self.stream, self.position, count)
+            self.position += count
+            size -= count
+        start = self.position - self.metadata_offset
+        suffix = self.metadata[start:start + size] if size else b""
+        self.position += size
+        return prefix + suffix
+
+
+def _script_archive_view(stream, size):
+    """Bound/count classic ZIP metadata before constructing any ZipInfo.
+
+    Deliberately no ZIP64 central/end metadata, split disks, concatenation-offset
+    inference or non-file central records. See docs/SCRIPT_ARCHIVE.md for limits.
+    """
+    _script_size(stream, size)
+    tail_offset = max(0, size - _ZIP_END_BYTES - _ZIP_COMMENT_BYTES)
+    tail = _script_read_at(stream, tail_offset, size - tail_offset)
+    end = tail.rfind(b"PK\x05\x06")
+    if end < 0 or len(tail) - end < _ZIP_END_BYTES:
+        raise zipfile.BadZipFile("Missing or truncated archive end record")
+    (_, disk, central_disk, disk_count, count, central_size, central_offset,
+     comment_size) = struct.unpack_from("<4s4H2IH", tail, end)
+    end_offset = tail_offset + end
+    if end + _ZIP_END_BYTES + comment_size != len(tail):
+        raise zipfile.BadZipFile("Archive comment extent does not end at EOF")
+    if (disk or central_disk or disk_count != count
+            or count == 0xffff or central_size == 0xffffffff or central_offset == 0xffffffff):
+        raise zipfile.BadZipFile("Split or ZIP64 archive metadata is unsupported")
+    if not 1 <= count <= MAX_SCRIPT_ENTRIES or central_size > MAX_SCRIPT_METADATA_BYTES:
+        raise FoundryError("archive_bounds", "Script archive exceeds entry or metadata bounds.",
+                           maximum_entries=MAX_SCRIPT_ENTRIES,
+                           maximum_metadata_bytes=MAX_SCRIPT_METADATA_BYTES)
+    if central_size < _ZIP_CENTRAL_BYTES or central_offset + central_size != end_offset:
+        raise zipfile.BadZipFile("Unsupported or inconsistent central-directory extent")
+    metadata = _script_read_at(stream, central_offset, size - central_offset)
+    # The second read must retain exactly the end record/comment we validated.
+    if metadata[central_size:] != tail[end:]:
+        raise FoundryError("artifact_changed", "Script archive metadata changed during inspection.")
+    # CPython probes this location even without ZIP64 sentinels. A coincidental
+    # signature here is refused too, rather than allowing another interpretation.
+    if metadata[central_size - 20:central_size - 16] == b"PK\x06\x07":
+        raise zipfile.BadZipFile("ZIP64 end metadata is unsupported")
+    position, actual_count, first_offset = 0, 0, central_offset
+    while position < central_size:
+        actual_count += 1
+        if actual_count > MAX_SCRIPT_ENTRIES:
+            raise FoundryError("archive_bounds", "Script archive exceeds its actual entry bound.",
+                               maximum_entries=MAX_SCRIPT_ENTRIES)
+        if central_size - position < _ZIP_CENTRAL_BYTES:
+            raise zipfile.BadZipFile("Truncated central-directory header")
+        (signature, _, _, _, method, _, _, _, compressed, expanded,
+         name_size, extra_size, member_comment_size, member_disk, _, _,
+         local_offset) = struct.unpack_from("<4s6H3I5H2I", metadata, position)
+        if signature != b"PK\x01\x02":
+            raise zipfile.BadZipFile("Unsupported central-directory record")
+        next_position = position + _ZIP_CENTRAL_BYTES + name_size + extra_size + member_comment_size
+        if next_position > central_size:
+            raise zipfile.BadZipFile("Central-directory member exceeds metadata extent")
+        if (member_disk or compressed == 0xffffffff or expanded == 0xffffffff
+                or local_offset == 0xffffffff):
+            raise zipfile.BadZipFile("Split or ZIP64 member metadata is unsupported")
+        if local_offset + 30 > central_offset:
+            raise zipfile.BadZipFile("Local header is outside the archive data extent")
+        first_offset = min(first_offset, local_offset)
+        if method not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            raise FoundryError("archive_compression", "Only stored and Deflate script members are supported.",
+                               method=method)
+        extra = position + _ZIP_CENTRAL_BYTES + name_size
+        extra_end = extra + extra_size
+        while extra < extra_end:
+            if extra_end - extra < 4:
+                raise zipfile.BadZipFile("Truncated central-directory extra field")
+            tag, length = struct.unpack_from("<HH", metadata, extra)
+            extra += 4 + length
+            if extra > extra_end or tag == 1:
+                raise zipfile.BadZipFile("Malformed or ZIP64 central-directory extra field")
+        position = next_position
+    if actual_count != count or first_offset != 0:
+        raise zipfile.BadZipFile("Inconsistent entry count or unsupported archive prefix")
+    _script_size(stream, size)
+    return _ScriptArchiveView(stream, size, central_offset, metadata)
+
+
 def inspect_artifact(path):
     path = plain_path(path)
     if not safe_relative(path.name) or not path.is_file() or path.suffix.lower() not in (".package", ".ts4script"):
@@ -114,9 +271,9 @@ def inspect_artifact(path):
         inspection = {"kind": "dbpf", "validation": "signature_only", "resources_validated": False}
     else:
         try:
-            with zipfile.ZipFile(path) as archive:
+            with path.open("rb") as stream, zipfile.ZipFile(_script_archive_view(stream, size)) as archive:
                 rows = archive.infolist()
-                if not 1 <= len(rows) <= 4096 or sum(row.file_size for row in rows) > 256 * 1024 * 1024:
+                if not 1 <= len(rows) <= MAX_SCRIPT_ENTRIES or sum(row.file_size for row in rows) > 256 * 1024 * 1024:
                     raise FoundryError("archive_bounds", "Script archive exceeds entry or expanded-size bounds.")
                 names = set()
                 for row in rows:
@@ -135,8 +292,9 @@ def inspect_artifact(path):
                 bad = archive.testzip()
                 if bad:
                     raise FoundryError("archive_crc", "Script archive failed CRC validation.", member=bad)
+                _script_size(stream, size)
                 inspection = {"kind": "ts4script_zip", "validation": "bounded_members_and_crc", "member_count": len(rows), "code_executed": False}
-        except (zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
+        except _SCRIPT_ZIP_ERRORS as exc:
             raise FoundryError("invalid_script_archive", "Unsupported or invalid script ZIP.") from exc
     if _hash_artifact(path, size) != before or path.stat().st_size != size:
         raise FoundryError("artifact_changed", "Source changed during inspection; no artifact was accepted.")
