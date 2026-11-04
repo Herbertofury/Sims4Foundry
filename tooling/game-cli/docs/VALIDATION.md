@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- `python -m unittest discover -s tests -v`: 63 tests.
+- `python -m unittest discover -s tests -v`: 66 tests collected: 63 passed, 3 CI-only Windows fixture tests skipped.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -17,8 +17,11 @@ source drift and verified staging copies, PID/HWND/geometry identity changes,
 helper pinning, post-capture identity changes, valid/truncated PNGs and CLI exits.
 
 The fake capture runner writes an actual fixture PNG. It does not launch FFmpeg.
-The native Windows APIs were not executed locally. Windows CI likewise does not
-constitute a real-game test. No launcher, profile mutation, input, save or exit
+The native Windows APIs were not executed locally. Three additional CI-only tests
+compile a tiny synthetic Canvas-window application on GitHub's disposable Windows
+runners and exercise the actual query-only Win32 bindings, ambiguity rejection and
+minimized-window rejection. This fixture is not Sims and never runs on the user's
+desktop. Windows CI does not constitute a real-game test. No launcher, profile mutation, input, save or exit
 validation took place. See QUALIFICATION.md for all outstanding live gates.
 
 A separate code review found and prompted fixes for persistent crash locks,

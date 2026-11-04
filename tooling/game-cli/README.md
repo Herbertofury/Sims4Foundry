@@ -127,6 +127,7 @@ risk. Launch can itself activate a window even without an explicit focus call.
 ## Development
 
 Run the full unittest suite after every change. It never requires Sims, Apex or a
-running desktop. CI uses Linux and Windows runners but does not test the game.
+running desktop. CI uses Linux and Windows runners, including an isolated native-window fixture,
+but does not test the game or run on the user's desktop.
 See [Architecture](docs/ARCHITECTURE.md), [Validation](docs/VALIDATION.md) and
 [qualification gates](docs/QUALIFICATION.md) before adding real mutation support.
