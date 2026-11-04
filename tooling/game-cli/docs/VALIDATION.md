@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 545 tests collected, 536 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 587 tests collected, 574 passed, 13 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -199,3 +199,19 @@ integrity checks on release. Original Up still ignores recorder/geometry failure
 but never bypasses missing ownership or equal known integrity. All 23 focused
 runner tests and the full local suite above pass; this is synthetic evidence,
 not a native sender or game validation.
+
+At release-binding head 45ee402a7c4bf2772d086f17d57ef9e9530b5d90, all four
+Windows/Linux Python 3.11/3.13 jobs passed. Both push and pull-request workflows
+were successful. Run:
+https://github.com/Herbertofury/Sims4Foundry/actions/runs/41817611227
+
+The source-only native packet backend adds 42 tests: 38 portable cases pass and
+four hosted Windows click/key/wheel/drag cases skip in this Linux workspace.
+Source review prompted fixes for exception-chain redaction and detached admission
+packet objects. Tests cover default denial, retained ownership, file-pin sharing,
+input-desktop observability, exact layout/modifiers, recorder faults and one
+original release after uncertainty. Full current-Python plus actual Python-3.7
+companion integration passes as counted above. Actual native image pinning,
+input-desktop observation and backend packet delivery still require exact-head
+Windows CI. The public native entry always refuses and game qualification remains
+absent. See [NATIVE_INPUT.md](NATIVE_INPUT.md).

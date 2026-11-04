@@ -100,6 +100,14 @@ limits so direct packet construction does not bypass encoder policy.
 The separate [companion journal](COMPANION_JOURNAL.md) now preserves exact
 schema-2 intents, callback attempts and receipt claims across client restart.
 It is not the synthetic engine, a transport executor or independent game evidence.
+
+The source-only [native packet backend](NATIVE_INPUT.md) supplies Win32 bindings
+for isolated fixture tests of the runner. Its public factory always refuses and
+there is no CLI input route. It retains the original process/image/lease binding,
+rechecks integrity and normal input context, and distinguishes queue acceptance
+from delivery or semantics. Original Up ignores geometry/recorder failure but
+still requires original ownership and equal known integrity. Native timing checks
+detect slow completion; they cannot forcibly preempt an OS call or trusted hook.
 Its default-denied injected seam cannot promote qualification; adapter-returned
 mutations remain unresolved. Shared cross-workspace history, a real admitted host,
 independent verification and Windows power-loss qualification are still absent.

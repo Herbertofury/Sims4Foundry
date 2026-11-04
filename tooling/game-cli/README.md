@@ -20,6 +20,9 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
   successful account Play record. It does not launch or write a cache.
 - Pure click/right-click, navigation-key, wheel and drag packet constructors plus
   a backend-injected release-safe sequence runner. No native sender is exposed.
+- A source-only native packet backend whose public entry always refuses. Its
+  private test seam is restricted to newly owned disposable Windows CI fixtures;
+  it does not supply live admission, a recorder or a game input command.
 - Source-only Apex migration inventory. It parses source without importing it.
 - Optional source-backed operation map that distinguishes inspected call sites,
   Apex-only paths and gaps in the bounded review; it grants no live capability.

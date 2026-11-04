@@ -18,7 +18,7 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | Passive process discovery | Bounded exact candidate reporting | Fake snapshots and native Windows CI enumeration | No launch admission |
 | Windows process/window inspection | Query-only implementation | Contract tests and native Windows CI fixture | Pending current game test |
 | WGC capture | Pinned helper implementation | Mock helper plus real PNG validation | Pending current game test |
-| No-Apex click/key/scroll/drag | Pure packet plans and injected runner only | Synthetic guard tests and native Windows fixture message receipts | No |
+| No-Apex click/key/scroll/drag | Pure packet plans, injected runner and source-only native backend with always-denied public entry | Synthetic guards and earlier Windows packet receipts; new backend fixtures require exact-head CI | No |
 | Foundry semantic game bridge | Uninstalled typed queue, narrow native bindings, default-denied socket transport and explicit-key peer hooks; no bootstrap/admitted host | Fabricated services and real isolated sockets on actual Python 3.7 | No |
 | No-Apex launch/entry/save/load/exit | Launch metadata preparation only | Synthetic EA metadata tests | No |
 
@@ -67,7 +67,7 @@ Only after this evidence is reviewed should a separate single-action test begin.
 ## Still required engineering
 
 - Complete the independently admitted mod-neutral host around the source-only transport/owner queue/native bindings. Process epoch and zone/household/save preconditions are carried across the boundary; peer key-possession hooks exist, but secure key provisioning, qualified channel/peer policy, live admission, scheduling and live durable reconciliation are not implemented. The offline client ledger stores exact intent and receipt history, but has no transport wiring, shared history anchor or independent outcome verifier; see [COMPANION_JOURNAL.md](COMPANION_JOURNAL.md).
-- A separately qualified external menu/input provider, including scroll/drag/keys.
+- A separately qualified external menu/input provider, including scroll/drag/keys. The new [native backend](NATIVE_INPUT.md) is source/fixture-only; it has no production admission, independent window epoch or real recorder verifier.
 - Integrate the cooperative process-lifetime lease with a shared durable journal and detect nonparticipating user/Apex/other-tool interference. A lease alone does not authorize input.
 - Windows crash-durable pre-dispatch evidence ordering.
 - Semantic state readers and independently checkable predicates for all domains.
