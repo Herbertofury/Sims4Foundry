@@ -23,6 +23,7 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | Foundry semantic game bridge | Uninstalled typed queue, narrow native bindings, default-denied socket transport and explicit-key peer hooks; no bootstrap/admitted host | Fabricated services and real isolated sockets on actual Python 3.7 | No |
 | Build object/mode observation | Uninstalled, separately admitted explicit-ID reader and transition-observation seam | Injected fabricated readers on current Python and actual Python 3.7 | No atomic/native/world-state proof |
 | Live queue observation contract | Pure bounded fixture validator, no native reader or action methods | Fabricated availability/identity/order/bounds tests | No |
+| Live queue reader seam | Uninstalled, separately admitted selected-actor observer with bounded queued/running iteration | Injected fabricated readers only | No native mode/identity/atomicity/completion proof |
 | No-Apex launch/entry/save/load/exit | Launch metadata preparation only | Synthetic EA metadata tests | No |
 
 ## Required controlled validation
@@ -80,6 +81,9 @@ Only after this evidence is reviewed should a separate single-action test begin.
   native queue observation, instance correlation and action outcomes remain open.
   The [Live fixture validator](LIVE_OBSERVATION.md) makes those data distinctions
   explicit but supplies no native observer, scheduler or outcome verification.
+  The separate [Live reader seam](LIVE_NATIVE_OBSERVATION.md) adds only an
+  uninstalled injected-reader contract; no native adapters, mode source, bootstrap
+  or action outcome verifier are qualified.
 - Reviewed, reversible mod installation/update/rollback on a closed disposable
   profile. Staging currently stops before installation.
 - Coverage expansion beyond the initial operation catalog, driven by real tasks.

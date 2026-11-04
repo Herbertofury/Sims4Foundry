@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 842 tests collected, 828 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 884 tests collected, 870 passed, 14 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -501,3 +501,36 @@ Thirty-two new mode-boundary tests and the 45 original native tests pass. The di
 Python 3.7 native/mode/queue/Build aggregate passes all 177 tests. Independent
 review and the complete local suite above pass; exact-head hosted CI is pending.
 No mode source, bootstrap, game install or game-facing execution was added.
+
+At explicit-mode head 78af6c693af7bf5493e14e834aedc80a4c2a9645, all six
+Windows/Linux Python 3.11/3.13/3.14 jobs passed in both push and PR workflows.
+The Windows 3.14 PR log explicitly passed all 32 new mode-boundary tests: 842
+tests collected, 10 total skips. Independent review also passed 58 extra
+fabricated checks on current Python and actual Python 3.7. The host CLI source
+and packaging inputs are unchanged from the preceding validated wheel; this
+checkpoint changes uninstalled companion source, tests and documentation only.
+Push: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41843368204
+PR: https://github.com/Herbertofury/Sims4Foundry/actions/runs/41843381808
+
+The uninstalled Live queue observer adds 42 fabricated tests. It admits one
+explicit actor only through the same host provider's separate Live-read scope,
+with captured owner/process/session and exact host-declared mode/save/generation
+context. Queued and running traversal shares a 64-row limit before materializing
+native iterables; one overflow probe reads no fields. Missing actors, channels
+and fields stay unavailable rather than empty or invented. Ordered duplicate
+occurrences remain distinct without durable selection or cancellation authority.
+
+Context/owner checks surround every ordinary reader/property/iteration step,
+including errors and exhaustion; control exceptions unwind without more reader
+work. Detached primitive results are capped at 32 KiB and always state unknown
+outcome, false qualification/evidence/atomicity, and call-local identity scope.
+Tests explicitly demonstrate an undetectable between-sample ABA transition, so
+passing tests cannot imply atomic readback or qualified native semantics.
+
+The 219-test Live/Build/native/mode/queue aggregate passes on current Python and
+actual isolated Python 3.7. Independent review passed 29 additional adversarial
+tests on both interpreters; the full local suite above passes. Existing native,
+Build, queue, transport, host CLI/fixture and packaging source remain unchanged.
+No real adapters, game imports, bootstrap, transport/CLI route or native action
+were added. Exact-head hosted CI is pending. See
+[LIVE_NATIVE_OBSERVATION.md](LIVE_NATIVE_OBSERVATION.md).

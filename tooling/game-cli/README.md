@@ -37,6 +37,8 @@ No-Apex launch, input, CAS/Live/Build mutation, save and normal exit remain unqu
   and transition notifications, tested only with injected fabricated readers.
 - A pure Live-queue fixture validator that separates unavailable channels, tuning
   IDs and transient occurrence references without inferring action completion.
+- An uninstalled, default-denied Live queue reader seam for one explicit actor,
+  tested only with injected fabricated readers and bounded sequential iteration.
 - Windows-only process/window identity inspection and pinned FFmpeg WGC capture
   implementations. Their native paths still need controlled Windows/game validation.
 
@@ -263,6 +265,11 @@ addition enables real Build or Live actions.
 The [Live fixture contract](docs/LIVE_OBSERVATION.md) validates bounded supplied
 data only. It preserves exact decimal-string IDs, unknown outcomes and separate
 queued/running availability without native reads, events or CLI integration.
+A separate [source-only Live reader](docs/LIVE_NATIVE_OBSERVATION.md) preserves
+unavailable fields while sampling one admitted actor's queued/running occurrences.
+It has no targets, labels, dispatch, transport route or durable selection handles.
+Exact mode and context come from trusted injected adapters; neither this seam nor
+fixture validation qualifies those adapters or establishes a real game outcome.
 
 ## Passive process discovery
 
