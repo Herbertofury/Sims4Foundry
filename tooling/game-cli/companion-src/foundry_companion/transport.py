@@ -79,6 +79,7 @@ def _read_exact(connection, size, deadline):
     while len(parts) < size:
         connection.settimeout(_remaining(deadline))
         chunk = connection.recv(size - len(parts))
+        _remaining(deadline)
         if not chunk:
             raise ProtocolError("truncated_frame", "EOF before complete frame; do not replay.")
         parts.extend(chunk)
@@ -93,9 +94,13 @@ def read_one(connection, deadline):
         raise ProtocolError("invalid_frame", "Frame length is outside the bound.")
     payload = _read_exact(connection, size, deadline)
     connection.settimeout(_remaining(deadline))
-    if connection.recv(1):
+    extra = connection.recv(1)
+    _remaining(deadline)
+    if extra:
         raise ProtocolError("extra_frame", "Exactly one frame and write EOF are required.")
-    return decode_payload(payload)
+    value = decode_payload(payload)
+    _remaining(deadline)
+    return value
 
 
 def _send_one(connection, value, deadline):
@@ -103,6 +108,7 @@ def _send_one(connection, value, deadline):
     connection.settimeout(_remaining(deadline))
     # sendall's timeout bounds the whole call, not each partial write.
     connection.sendall(frame)
+    _remaining(deadline)
 
 
 @dataclass(frozen=True)
@@ -289,6 +295,7 @@ class LoopbackTransport:
         try:
             if self._stop.is_set():
                 return
+            _remaining(deadline)
             if self._policy.authorize_peer(connection, peer, self.binding, deadline) is not True:
                 return
             _remaining(deadline)
@@ -321,11 +328,13 @@ class LoopbackTransport:
                     self._workers.pop(connection, None)
 
     def _handle(self, value, deadline):
+        _remaining(deadline)
         if self._stop.is_set():
             raise ProtocolError("transport_shutdown", "Transport is permanently closed.")
         session, epoch = self.binding.session_id, self.binding.process_epoch
         if value.get("kind") == "receipt_read":
             request_id, digest = parse_receipt_read(value, session, epoch)
+            _remaining(deadline)
             record = self._records.get(request_id)
             if record is None:
                 self._queue.block_mutations("history_missing")
@@ -336,6 +345,7 @@ class LoopbackTransport:
             snapshot = record.refusal or self._queue.status(request_id)
             return receipt(request_id, digest, session, epoch, snapshot), snapshot.state != "refused"
         submission = parse_submit(value, session, epoch)
+        _remaining(deadline)
         request, digest = submission.request, submission.request_sha256
         request_id = request.request_id
         record = self._records.get(request_id)

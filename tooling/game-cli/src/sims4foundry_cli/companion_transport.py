@@ -164,20 +164,28 @@ def exchange_once(port: int, message: Submission | ReceiptRead, *, authorize_pee
         while len(result) < count:
             connection.settimeout(remaining())
             chunk = connection.recv(count - len(result))
+            remaining()
             _require(bool(chunk), "truncated_frame", "Missing reply bytes; outcome remains uncertain.")
             result.extend(chunk)
         return bytes(result)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
         connection.settimeout(remaining())
         connection.connect(("127.0.0.1", port))
+        remaining()
         _require(authorize_peer(connection, deadline, submission) is True,
                  "peer_denied", "Server identity was not independently authorized.")
         connection.settimeout(remaining())
         connection.sendall(frame)
+        remaining()
         connection.shutdown(socket.SHUT_WR)
+        remaining()
         size = struct.unpack(">I", read_exact(connection, 4))[0]
         _require(1 <= size <= v1.MAX_FRAME_BYTES, "invalid_frame", "Invalid reply frame size.")
         payload = read_exact(connection, size)
         connection.settimeout(remaining())
-        _require(not connection.recv(1), "extra_frame", "Only one response is allowed.")
-        return parse_receipt(v1.decode_payload(payload), submission)
+        extra = connection.recv(1)
+        remaining()
+        _require(not extra, "extra_frame", "Only one response is allowed.")
+        result = parse_receipt(v1.decode_payload(payload), submission)
+        remaining()
+        return result

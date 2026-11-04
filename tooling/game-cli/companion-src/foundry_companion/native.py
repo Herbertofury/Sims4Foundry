@@ -61,17 +61,83 @@ def _same_live_context(before, after):
                     ('zone_id', 'household_id', 'client_id', 'save_slot', 'save_guid')))
 
 
+def _capture_binding(session_id, process_epoch):
+    """Copy a host declaration, never retain a caller-owned epoch object."""
+    from .queue import ProcessEpoch
+    if (type(session_id) is not str or len(session_id) != 32
+            or any(character not in '0123456789abcdef' for character in session_id)
+            or type(process_epoch) is not ProcessEpoch
+            or type(process_epoch.pid) is not int or not 1 <= process_epoch.pid <= 2**32-1
+            or type(process_epoch.creation_filetime) is not int
+            or not 1 <= process_epoch.creation_filetime <= 2**64-1):
+        raise NativeRefusal('An exact host session and process-epoch binding is required.')
+    return (session_id, process_epoch.pid, process_epoch.creation_filetime)
+
+
+def _copy_request(request):
+    """Detach every typed value; frozen dataclasses are not an alias boundary."""
+    from .queue import (Request, ProcessEpoch, ObserveArguments, SetSpeedArguments,
+                        EnterCasArguments, RequestExitMenuArguments)
+    if type(request) is not Request:
+        raise NativeRefusal('A validated typed companion request is required.')
+    Request.validate(request)
+    arguments = request.arguments
+    if type(arguments) is ObserveArguments:
+        copied_arguments = ObserveArguments()
+    elif type(arguments) is SetSpeedArguments:
+        copied_arguments = SetSpeedArguments(arguments.speed)
+    elif type(arguments) is EnterCasArguments:
+        copied_arguments = EnterCasArguments(arguments.sim_id)
+    else:
+        copied_arguments = RequestExitMenuArguments()
+    epoch = request.process_epoch
+    return Request(request.request_id, request.session_id, request.operation,
+                   copied_arguments, ttl_seconds=request.ttl_seconds,
+                   expected_zone_id=request.expected_zone_id,
+                   expected_household_id=request.expected_household_id,
+                   process_epoch=None if epoch is None else ProcessEpoch(epoch.pid, epoch.creation_filetime),
+                   expected_save_slot=request.expected_save_slot,
+                   expected_save_guid=request.expected_save_guid)
+
+
+def _check_admission_request(request, admitted_view):
+    from .queue import QueueError
+    try:
+        copied_view = _copy_request(admitted_view)
+        # TTL admits both int and float, but their transport representations
+        # differ even when Python's numeric/dataclass equality says otherwise.
+        unchanged = (copied_view == request
+                     and type(copied_view.ttl_seconds) is type(request.ttl_seconds))
+    except (QueueError, AttributeError, TypeError):
+        unchanged = False
+    if not unchanged:
+        raise NativeRefusal('Admission changed the exact request it was asked to admit.')
+
+
 class NativeAPI(object):
-    def __init__(self, services, admission=None, command_loader=None):
+    def __init__(self, services, admission=None, command_loader=None,
+                 session_id=None, process_epoch=None):
         self._owner = threading.current_thread().ident
         self._owner_thread = threading.current_thread()
         self._services = services
         self._admission = admission if admission is not None else DenyAdmission()
         self._load = command_loader if command_loader is not None else importlib.import_module
+        # This declaration must be independently validated by the host. It is
+        # neither an OS identity check nor live authorization. No rebind exists.
+        self._binding = (None if session_id is None and process_epoch is None
+                         else _capture_binding(session_id, process_epoch))
 
     def _owned(self):
         if threading.current_thread() is not self._owner_thread or threading.current_thread().ident != self._owner:
             raise NativeRefusal('All native reads and writes belong to the captured game owner thread.')
+
+    def _bound(self, request):
+        if (self._binding is None
+                or _capture_binding(request.session_id, request.process_epoch) != self._binding):
+            raise NativeRefusal('The request must match the captured host session and process epoch.')
+        if (request.operation != 'observe'
+                and (request.expected_save_slot is None or request.expected_save_guid is None)):
+            raise NativeRefusal('Native mutations require exact save slot and GUID context.')
 
     def _read(self):
         """All observations are primitive values; no Sim scan or appearance reads."""
@@ -112,23 +178,37 @@ class NativeAPI(object):
 
     def _admitted_read(self, request):
         self._owned()
-        if self._admission.require_read(request) is not True:
+        self._bound(request)
+        admitted_view = _copy_request(request)
+        verdict = self._admission.require_read(admitted_view)
+        _check_admission_request(request, admitted_view)
+        if verdict is not True:
             raise NativeRefusal('Admission must explicitly permit this exact observed request.')
+        self._bound(request)
         return self._read()
 
     def _before_mutation(self, request):
         observation, client = self._admitted_read(request)
         if (observation['errors'] or observation['zone_id'] != request.expected_zone_id
                 or observation['household_id'] != request.expected_household_id
-                or (request.expected_save_slot is not None
-                    and observation['save_slot'] != request.expected_save_slot)
-                or (request.expected_save_guid is not None
-                    and observation['save_guid'] != request.expected_save_guid)
+                or observation['save_slot'] != request.expected_save_slot
+                or observation['save_guid'] != request.expected_save_guid
                 or observation['zone_running'] is not True or observation['in_build_buy'] is not False):
             raise NativeRefusal('Exact running Live zone/household context changed or is unobservable.')
-        if self._admission.require_mutation(request, observation) is not True:
+        admitted_view = _copy_request(request)
+        observation_view = dict(observation)
+        observation_view['errors'] = dict(observation['errors'])
+        verdict = self._admission.require_mutation(admitted_view, observation_view)
+        _check_admission_request(request, admitted_view)
+        if verdict is not True:
             raise NativeRefusal('Mutation requires an exact current profile/lease/operation admission.')
-        return observation, client
+        self._bound(request)
+        # An admission hook may itself change live context. One bounded read
+        # checks its side effects without recursively entering admission again.
+        current, current_client = self._read()
+        if not _same_live_context(observation, current):
+            raise NativeRefusal('Native context changed during mutation admission.')
+        return current, current_client
 
     def execute(self, request):
         """Called only by an admitted owner-thread queue, never a transport thread.
@@ -137,10 +217,8 @@ class NativeAPI(object):
         exit. The outer host must keep unknown outcomes blocked from replay.
         """
         self._owned()
-        from .queue import Request
-        if type(request) is not Request:
-            raise NativeRefusal('A validated typed companion request is required.')
-        request.validate()
+        request = _copy_request(request)
+        self._bound(request)
         if request.operation == 'observe':
             observation, _ = self._admitted_read(request)
             return {'outcome': 'verified' if not observation['errors'] else 'unverified',
@@ -183,14 +261,22 @@ class NativeAPI(object):
                 raise NativeRefusal('CAS requires the exact instanced Sim in the admitted household.')
             # Provider must preserve relevant Sim/form/household transactions;
             # absence is a refusal, not permission to remove the original guards.
-            with self._admission.cas_scope(request, sim, client):
+            scope_request = _copy_request(request)
+            with self._admission.cas_scope(scope_request, sim, client):
+                _check_admission_request(request, scope_request)
+                # Target construction can invoke game code. Keep it inside the
+                # admitted preservation scope and before the final fresh checks.
+                prepared_target = target(arguments['sim_id'])
+                _check_admission_request(request, scope_request)
                 current, current_client = self._before_mutation(request)
+                _check_admission_request(request, scope_request)
                 if not _same_live_context(before, current):
                     raise NativeRefusal('Native save/client context changed while preparing CAS entry.')
                 if (self._services.sim_info_manager().get(int(arguments['sim_id'])) is not sim
+                        or _id(sim.id) != arguments['sim_id']
                         or sim.get_sim_instance() is not instance or _id(sim.household_id) != current['household_id']):
                     raise NativeRefusal('CAS target changed during preparation.')
-                command(target(arguments['sim_id']), _connection=int(current['client_id']))
+                command(prepared_target, _connection=int(current['client_id']))
             return {'outcome': 'unverified', 'request': 'cas_entry', 'sim_id': arguments['sim_id'],
                     'cas_visibility_verified': False, 'save_persistence_verified': False, 'game_qualified': False}
         raise NativeRefusal('Unsupported companion operation; no fallback exists.')

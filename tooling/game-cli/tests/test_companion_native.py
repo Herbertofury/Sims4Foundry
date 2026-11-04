@@ -13,7 +13,11 @@ if str(SOURCE) not in sys.path:
     sys.path.insert(0, str(SOURCE))
 from foundry_companion.native import NativeAPI, NativeRefusal, DenyAdmission
 from foundry_companion.queue import (Request, ObserveArguments, SetSpeedArguments,
-                                     EnterCasArguments, RequestExitMenuArguments)
+                                     EnterCasArguments, RequestExitMenuArguments, ProcessEpoch,
+                                     QueueError)
+
+
+OPERATIONS = ('observe','live.set_speed','cas.enter','game.request_exit_menu')
 
 
 def request(operation='observe'):
@@ -21,16 +25,25 @@ def request(operation='observe'):
                  'cas.enter':EnterCasArguments('30'), 'game.request_exit_menu':RequestExitMenuArguments()}[operation]
     return Request('1'*32,'2'*32,operation,arguments,
                    expected_zone_id=None if operation=='observe' else '10',
-                   expected_household_id=None if operation=='observe' else '20')
+                   expected_household_id=None if operation=='observe' else '20',
+                   process_epoch=ProcessEpoch(123,456),
+                   expected_save_slot=None if operation=='observe' else 4,
+                   expected_save_guid=None if operation=='observe' else '99')
 
 
 class Admission(DenyAdmission):
     def __init__(self):
         self.read = True; self.mutate = True; self.cas = False; self.enter = None; self.scopes = []
-    def require_read(self, request): return self.read
-    def require_mutation(self, request, observation): return self.mutate
+        self.calls = []
+    def require_read(self, request):
+        self.calls.append('read')
+        return self.read
+    def require_mutation(self, request, observation):
+        self.calls.append('mutation')
+        return self.mutate
     @contextmanager
     def cas_scope(self, request, sim, client):
+        self.calls.append('scope')
         if not self.cas: raise NativeRefusal('No qualified CAS preservation scope')
         self.scopes.append('enter')
         if self.enter: self.enter()
@@ -50,6 +63,12 @@ class NativeBindingTests(unittest.TestCase):
                          get_persistence_service=lambda:self.persistence,game_clock_service=lambda:self.clock,
                          time_service=lambda:NS(sim_now=NS(absolute_ticks=lambda:100)),
                          sim_info_manager=lambda:NS(get=lambda sid:self.sim if sid==30 else None))
+        self.service_reads=[]
+        for name,function in list(vars(self.services).items()):
+            def observed(name=name,function=function):
+                self.service_reads.append(name)
+                return function()
+            setattr(self.services,name,observed)
         self.commands=[]; self.loads=[]; self.admission=Admission()
         self.on_speed=None; self.on_cas=None
         def speed(value, source, _connection):
@@ -67,14 +86,271 @@ class NativeBindingTests(unittest.TestCase):
             self.loads.append(name)
             return self.modules[name]
         self.loader=load
-        self.api=NativeAPI(self.services,self.admission,self.loader)
+        self.api=NativeAPI(self.services,self.admission,self.loader,
+                           session_id='2'*32,process_epoch=ProcessEpoch(123,456))
+
+    def assert_untouched(self):
+        self.assertEqual([],self.service_reads)
+        self.assertEqual([],self.admission.calls)
+        self.assertEqual([],self.loads)
+        self.assertEqual([],self.admission.scopes)
+        self.assertEqual([],self.commands)
+
+    def test_unbound_api_refuses_before_any_admission_or_game_access(self):
+        api=NativeAPI(self.services,self.admission,self.loader)
+        for operation in OPERATIONS:
+            with self.assertRaises(NativeRefusal):api.execute(request(operation))
+        self.assert_untouched()
+
+    def test_invalid_configured_binding_is_rejected_without_game_access(self):
+        bindings=((None,ProcessEpoch(123,456)),('2'*32,None),
+                  ('2'*31,ProcessEpoch(123,456)),('A'*32,ProcessEpoch(123,456)),
+                  (True,ProcessEpoch(123,456)),('2'*32,NS(pid=123,creation_filetime=456)))
+        for session,epoch in bindings:
+            with self.subTest(session=session,epoch=epoch):
+                with self.assertRaises(NativeRefusal):
+                    NativeAPI(self.services,self.admission,self.loader,
+                              session_id=session,process_epoch=epoch)
+        self.assert_untouched()
+
+    def test_invalid_configured_epoch_fields_are_not_coerced(self):
+        for field,value in (('pid',True),('pid','123'),('pid',0),('pid',2**32),
+                            ('creation_filetime',True),('creation_filetime','456'),
+                            ('creation_filetime',0),('creation_filetime',2**64)):
+            with self.subTest(field=field,value=value):
+                epoch=ProcessEpoch(123,456)
+                object.__setattr__(epoch,field,value)
+                with self.assertRaises(NativeRefusal):
+                    NativeAPI(self.services,self.admission,self.loader,
+                              session_id='2'*32,process_epoch=epoch)
+        self.assert_untouched()
+
+    def test_wrong_configured_binding_refuses_before_game_access(self):
+        for session,epoch in (('3'*32,ProcessEpoch(123,456)),
+                              ('2'*32,ProcessEpoch(124,456)),
+                              ('2'*32,ProcessEpoch(123,457))):
+            api=NativeAPI(self.services,self.admission,self.loader,
+                          session_id=session,process_epoch=epoch)
+            for operation in OPERATIONS:
+                with self.assertRaises(NativeRefusal):api.execute(request(operation))
+        self.assert_untouched()
+
+    def test_request_session_and_epoch_must_match_before_game_access(self):
+        changes=(dict(session_id='3'*32),dict(process_epoch=None),
+                 dict(process_epoch=ProcessEpoch(124,456)),
+                 dict(process_epoch=ProcessEpoch(123,457)))
+        for operation in OPERATIONS:
+            for change in changes:
+                with self.subTest(operation=operation,change=change):
+                    with self.assertRaises(NativeRefusal):
+                        self.api.execute(replace(request(operation),**change))
+        self.assert_untouched()
+
+    def test_mutations_need_both_save_preconditions_before_game_access(self):
+        for operation in OPERATIONS[1:]:
+            for fields in (('expected_save_slot','expected_save_guid'),
+                           ('expected_save_slot',),('expected_save_guid',)):
+                value=request(operation)
+                # Partial save context is already invalid to Request; both absent
+                # remains valid only for the pure legacy queue test interface.
+                for field in fields:object.__setattr__(value,field,None)
+                with self.subTest(operation=operation,fields=fields):
+                    with self.assertRaises((NativeRefusal,QueueError)):self.api.execute(value)
+        self.assert_untouched()
+
+    def test_configured_epoch_is_copied_not_aliased(self):
+        for field,value in (('pid',124),('creation_filetime',457)):
+            self.setUp()
+            epoch=ProcessEpoch(123,456)
+            api=NativeAPI(self.services,self.admission,self.loader,
+                          session_id='2'*32,process_epoch=epoch)
+            object.__setattr__(epoch,field,value)
+            with self.assertRaises(NativeRefusal):api.execute(replace(request(),process_epoch=epoch))
+            self.assert_untouched()
+            self.assertEqual('verified',api.execute(request())['outcome'])
+
+    def test_execute_copies_complete_caller_request_before_hooks(self):
+        original=request('live.set_speed')
+        expected=request('live.set_speed')
+        seen=[]
+        def read(view):
+            seen.append(view)
+            self.assertEqual(expected,view)
+            self.assertIsNot(original,view)
+            self.assertIsNot(original.arguments,view.arguments)
+            self.assertIsNot(original.process_epoch,view.process_epoch)
+            object.__setattr__(original,'request_id','3'*32)
+            object.__setattr__(original,'session_id','4'*32)
+            object.__setattr__(original,'operation','game.request_exit_menu')
+            object.__setattr__(original.arguments,'speed',3)
+            object.__setattr__(original.process_epoch,'pid',124)
+            object.__setattr__(original.process_epoch,'creation_filetime',457)
+            object.__setattr__(original,'ttl_seconds',1.0)
+            object.__setattr__(original,'expected_zone_id','11')
+            object.__setattr__(original,'expected_household_id','21')
+            object.__setattr__(original,'expected_save_slot',5)
+            object.__setattr__(original,'expected_save_guid','100')
+            return True
+        self.admission.require_read=read
+        result=self.api.execute(original)
+        self.assertEqual('verified',result['outcome'])
+        self.assertEqual([('speed','two','foundry.cli',5)],self.commands)
+        self.assertEqual(2,len(seen))
+        self.assertIsNot(seen[0],seen[1])
+        self.assertIsNot(seen[0].arguments,seen[1].arguments)
+        self.assertIsNot(seen[0].process_epoch,seen[1].process_epoch)
+
+    def test_read_hook_cannot_rewrite_any_admitted_request_value(self):
+        changes=(lambda value:object.__setattr__(value,'request_id','3'*32),
+                 lambda value:object.__setattr__(value,'session_id','3'*32),
+                 lambda value:object.__setattr__(value,'operation','observe'),
+                 lambda value:object.__setattr__(value.arguments,'speed',3),
+                 lambda value:object.__setattr__(value.process_epoch,'pid',124),
+                 lambda value:object.__setattr__(value.process_epoch,'creation_filetime',457),
+                 lambda value:object.__setattr__(value,'ttl_seconds',1.0),
+                 lambda value:object.__setattr__(value,'expected_zone_id','11'),
+                 lambda value:object.__setattr__(value,'expected_household_id','21'),
+                 lambda value:object.__setattr__(value,'expected_save_slot',5),
+                 lambda value:object.__setattr__(value,'expected_save_guid','100'))
+        for index,change in enumerate(changes):
+            with self.subTest(change=index):
+                self.setUp()
+                def read(value):change(value);return True
+                self.admission.require_read=read
+                with self.assertRaises(NativeRefusal):self.api.execute(request('live.set_speed'))
+                self.assert_untouched()
+
+    def test_mutation_hook_cannot_rewrite_admitted_request_or_argument(self):
+        for change in (lambda value:object.__setattr__(value.arguments,'speed',3),
+                       lambda value:object.__setattr__(value.process_epoch,'pid',124),
+                       lambda value:object.__setattr__(value,'expected_save_slot',5)):
+            self.setUp()
+            def mutate(value,observation):change(value);return True
+            self.admission.require_mutation=mutate
+            with self.assertRaises(NativeRefusal):self.api.execute(request('live.set_speed'))
+            self.assertTrue(self.service_reads)
+            self.assertEqual([],self.loads)
+            self.assertEqual([],self.admission.scopes)
+            self.assertEqual([],self.commands)
+
+    def test_admission_request_ttl_numeric_type_is_exact(self):
+        for original,replacement in ((5.0,5),(5,5.0)):
+            for hook in ('read','mutation'):
+                with self.subTest(original=original,replacement=replacement,hook=hook):
+                    self.setUp()
+                    def changed(value,*unused):
+                        object.__setattr__(value,'ttl_seconds',replacement)
+                        return True
+                    setattr(self.admission,'require_'+hook,changed)
+                    value=replace(request('live.set_speed'),ttl_seconds=original)
+                    with self.assertRaises(NativeRefusal):self.api.execute(value)
+                    if hook=='read':self.assertEqual([],self.service_reads)
+                    self.assertEqual([],self.loads)
+                    self.assertEqual([],self.admission.scopes)
+                    self.assertEqual([],self.commands)
+
+    def test_retained_admission_requests_cannot_rewrite_later_execution(self):
+        retained=[]
+        def read(value):retained.append(value);return True
+        def mutate(value,observation):retained.append(value);return True
+        self.admission.require_read=read
+        self.admission.require_mutation=mutate
+        def loader(name):
+            self.assertEqual(2,len(retained))
+            for value in retained:
+                object.__setattr__(value.arguments,'speed',3)
+                object.__setattr__(value.process_epoch,'pid',124)
+                object.__setattr__(value,'expected_save_slot',5)
+            return self.loader(name)
+        api=NativeAPI(self.services,self.admission,loader,
+                      session_id='2'*32,process_epoch=ProcessEpoch(123,456))
+        self.assertEqual('verified',api.execute(request('live.set_speed'))['outcome'])
+        self.assertEqual([('speed','two','foundry.cli',5)],self.commands)
+        self.assertEqual(4,len(retained))
+        self.assertEqual(request('live.set_speed'),retained[-1])
+
+    def test_mutation_observation_view_cannot_rewrite_readback_or_client(self):
+        def mutate(value,observation):
+            observation['client_id']='6'
+            observation['errors']['fabricated']='rewritten'
+            return True
+        self.admission.require_mutation=mutate
+        result=self.api.execute(request('live.set_speed'))
+        self.assertEqual('verified',result['outcome'])
+        self.assertEqual('5',result['before']['client_id'])
+        self.assertEqual({},result['before']['errors'])
+        self.assertEqual([('speed','two','foundry.cli',5)],self.commands)
+
+    def test_retained_observation_cannot_hide_import_time_client_drift(self):
+        retained=[]
+        def mutate(value,observation):retained.append(observation);return True
+        self.admission.require_mutation=mutate
+        def loader(name):
+            self.client.id=6
+            for observation in retained:observation['client_id']='6'
+            return self.loader(name)
+        api=NativeAPI(self.services,self.admission,loader,
+                      session_id='2'*32,process_epoch=ProcessEpoch(123,456))
+        with self.assertRaises(NativeRefusal):api.execute(request('live.set_speed'))
+        self.assertEqual([],self.commands)
+
+    def test_retained_observation_cannot_hide_cas_scope_client_drift(self):
+        self.admission.cas=True
+        retained=[]
+        def mutate(value,observation):retained.append(observation);return True
+        self.admission.require_mutation=mutate
+        def changed():
+            self.client.id=6
+            for observation in retained:observation['client_id']='6'
+        self.admission.enter=changed
+        with self.assertRaises(NativeRefusal):self.api.execute(request('cas.enter'))
+        self.assertEqual([],self.commands)
+        self.assertEqual(['enter','exit'],self.admission.scopes)
+
+    def test_cas_scope_request_mutation_refuses_and_closes_scope(self):
+        self.admission.cas=True
+        original_scope=self.admission.cas_scope
+        original=request('cas.enter')
+        @contextmanager
+        def scope(value,sim,client):
+            self.assertIsNot(original,value)
+            self.assertIsNot(original.arguments,value.arguments)
+            self.assertIsNot(original.process_epoch,value.process_epoch)
+            self.assertIs(self.sim,sim)
+            self.assertIs(self.client,client)
+            with original_scope(value,sim,client):
+                object.__setattr__(value.arguments,'sim_id','31')
+                yield
+        self.admission.cas_scope=scope
+        with self.assertRaises(NativeRefusal):self.api.execute(original)
+        self.assertEqual([],self.commands)
+        self.assertEqual(['enter','exit'],self.admission.scopes)
+
+    def test_retained_scope_request_mutation_during_target_preparation_refuses(self):
+        self.admission.cas=True
+        original_scope=self.admission.cas_scope
+        retained=[]
+        @contextmanager
+        def scope(value,sim,client):
+            retained.append(value)
+            with original_scope(value,sim,client):yield
+        self.admission.cas_scope=scope
+        def target(value):
+            object.__setattr__(retained[0],'expected_save_guid','100')
+            return ('target',value)
+        self.modules['server_commands.argument_helpers'].OptionalTargetParam=target
+        with self.assertRaises(NativeRefusal):self.api.execute(request('cas.enter'))
+        self.assertEqual([],self.commands)
+        self.assertEqual(['enter','exit'],self.admission.scopes)
 
     def test_default_admission_refuses_before_services_or_command_imports(self):
-        api=NativeAPI(None,command_loader=self.loader)
-        for operation in ('observe','live.set_speed','cas.enter','game.request_exit_menu'):
+        api=NativeAPI(None,command_loader=self.loader,
+                      session_id='2'*32,process_epoch=ProcessEpoch(123,456))
+        for operation in OPERATIONS:
             with self.assertRaises(NativeRefusal): api.execute(request(operation))
         self.assertEqual([],self.loads)
         self.assertEqual([],self.commands)
+        self.assertEqual([],self.service_reads)
 
     def test_explicit_save_context_is_rechecked_before_command_imports(self):
         for changes in (dict(expected_save_slot=5, expected_save_guid="99"),
@@ -96,7 +372,8 @@ class NativeBindingTests(unittest.TestCase):
         self.assertEqual([],self.loads)
 
     def test_unloaded_services_are_unknown_not_a_fabricated_mode(self):
-        api=NativeAPI(None,self.admission,self.loader)
+        api=NativeAPI(None,self.admission,self.loader,
+                      session_id='2'*32,process_epoch=ProcessEpoch(123,456))
         result=api.execute(request())
         self.assertEqual('unverified',result['outcome'])
         self.assertIsNone(result['observation']['zone_id'])
@@ -161,9 +438,78 @@ class NativeBindingTests(unittest.TestCase):
         def loader(name):
             self.persistence.get_save_slot_proto_guid=lambda:100
             return self.loader(name)
-        api=NativeAPI(self.services,self.admission,loader)
+        api=NativeAPI(self.services,self.admission,loader,
+                      session_id='2'*32,process_epoch=ProcessEpoch(123,456))
         with self.assertRaises(NativeRefusal):api.execute(request('live.set_speed'))
         self.assertEqual([],self.commands)
+
+    def test_command_import_cannot_bypass_read_or_mutation_readmission(self):
+        for operation in OPERATIONS[1:]:
+            for field in ('read','mutate'):
+                with self.subTest(operation=operation,field=field):
+                    self.setUp();self.admission.cas=True
+                    def loader(name):
+                        setattr(self.admission,field,False)
+                        return self.loader(name)
+                    api=NativeAPI(self.services,self.admission,loader,
+                                  session_id='2'*32,process_epoch=ProcessEpoch(123,456))
+                    with self.assertRaises(NativeRefusal):api.execute(request(operation))
+                    self.assertTrue(self.loads)
+                    self.assertEqual([],self.commands)
+                    self.assertEqual([],self.admission.scopes)
+
+    def test_final_mutation_admission_context_drift_never_submits(self):
+        changes=(lambda:setattr(self.zone,'id',11),
+                 lambda:setattr(self.household,'id',21),
+                 lambda:setattr(self.client,'id',6),
+                 lambda:setattr(self.persistence,'get_save_slot_proto_buff',lambda:NS(slot_id=5)),
+                 lambda:setattr(self.persistence,'get_save_slot_proto_guid',lambda:100),
+                 lambda:setattr(self.zone,'is_zone_running',False),
+                 lambda:setattr(self.zone,'is_in_build_buy',True))
+        for operation in OPERATIONS[1:]:
+            for index,change in enumerate(changes):
+                with self.subTest(operation=operation,change=index):
+                    self.setUp();self.admission.cas=True
+                    admissions=[]
+                    final_count=3 if operation=='cas.enter' else 2
+                    def mutate(value,observation):
+                        admissions.append(observation)
+                        if len(admissions)==final_count:change()
+                        return True
+                    self.admission.require_mutation=mutate
+                    with self.assertRaises(NativeRefusal):self.api.execute(request(operation))
+                    self.assertEqual(final_count,len(admissions))
+                    self.assertEqual([],self.commands)
+                    self.assertEqual(['enter','exit'] if operation=='cas.enter' else [],self.admission.scopes)
+
+    def test_initial_mutation_admission_context_drift_refuses_before_imports(self):
+        for operation in OPERATIONS[1:]:
+            with self.subTest(operation=operation):
+                self.setUp();self.admission.cas=True
+                def mutate(value,observation):
+                    self.client.id=6
+                    return True
+                self.admission.require_mutation=mutate
+                with self.assertRaises(NativeRefusal):self.api.execute(request(operation))
+                self.assertEqual([],self.loads)
+                self.assertEqual([],self.admission.scopes)
+                self.assertEqual([],self.commands)
+
+    def test_mutation_admission_refresh_is_bounded_without_admission_loop(self):
+        for operation in OPERATIONS:
+            with self.subTest(operation=operation):
+                self.setUp();self.admission.cas=True
+                self.api.execute(request(operation))
+                admissions=3 if operation=='cas.enter' else 2
+                if operation=='observe':
+                    self.assertEqual(1,self.admission.calls.count('read'))
+                    self.assertEqual(0,self.admission.calls.count('mutation'))
+                    self.assertEqual(1,self.service_reads.count('current_zone'))
+                else:
+                    self.assertEqual(admissions,self.admission.calls.count('read'))
+                    self.assertEqual(admissions,self.admission.calls.count('mutation'))
+                    reads=2*admissions+(1 if operation=='live.set_speed' else 0)
+                    self.assertEqual(reads,self.service_reads.count('current_zone'))
 
     def test_unknown_native_speed_is_not_coerced(self):
         for speed in (True,'2',2.1,4):
@@ -205,13 +551,77 @@ class NativeBindingTests(unittest.TestCase):
 
     def test_cas_preparation_drift_never_submits(self):
         self.admission.cas=True
-        changes=(lambda:setattr(self.client,'id',6),lambda:setattr(self.sim,'household_id',21),
+        changes=(lambda:setattr(self.client,'id',6),lambda:setattr(self.sim,'id',31),
+                 lambda:setattr(self.sim,'household_id',21),
                  lambda:setattr(self,'instance',object()))
         for change in changes:
             self.setUp();self.admission.cas=True;self.admission.enter=change
             with self.assertRaises(NativeRefusal):self.api.execute(request('cas.enter'))
             self.assertEqual([],self.commands)
             self.assertEqual(['enter','exit'],self.admission.scopes)
+
+    def test_cas_target_preparation_drift_never_submits(self):
+        changes=(lambda:setattr(self.zone,'id',11),
+                 lambda:setattr(self.household,'id',21),
+                 lambda:setattr(self.client,'id',6),
+                 lambda:setattr(self.persistence,'get_save_slot_proto_buff',lambda:NS(slot_id=5)),
+                 lambda:setattr(self.persistence,'get_save_slot_proto_guid',lambda:100),
+                 lambda:setattr(self.zone,'is_zone_running',False),
+                 lambda:setattr(self.zone,'is_in_build_buy',True),
+                 lambda:setattr(self.sim,'id',31),
+                 lambda:setattr(self.sim,'household_id',21),
+                 lambda:setattr(self,'instance',object()),
+                 lambda:setattr(self,'sim',NS(id=30,household_id=20,get_sim_instance=lambda:self.instance)))
+        for index,change in enumerate(changes):
+            with self.subTest(change=index):
+                self.setUp();self.admission.cas=True
+                def target(value):
+                    change()
+                    return ('target',value)
+                self.modules['server_commands.argument_helpers'].OptionalTargetParam=target
+                with self.assertRaises(NativeRefusal):self.api.execute(request('cas.enter'))
+                self.assertEqual([],self.commands)
+                self.assertEqual(['enter','exit'],self.admission.scopes)
+
+    def test_cas_target_is_prepared_inside_scope_before_fresh_admission(self):
+        self.admission.cas=True
+        def target(value):
+            self.assertEqual(['enter'],self.admission.scopes)
+            self.assertEqual(['read','mutation','read','mutation','scope'],self.admission.calls)
+            return ('target',value)
+        self.modules['server_commands.argument_helpers'].OptionalTargetParam=target
+        self.api.execute(request('cas.enter'))
+        self.assertEqual(['read','mutation','read','mutation','scope','read','mutation'],self.admission.calls)
+        self.assertEqual([('cas',('target','30'),5)],self.commands)
+        self.assertEqual(['enter','exit'],self.admission.scopes)
+
+    def test_cas_target_cannot_bypass_read_or_mutation_readmission(self):
+        for field in ('read','mutate'):
+            with self.subTest(field=field):
+                self.setUp();self.admission.cas=True
+                def target(value):
+                    setattr(self.admission,field,False)
+                    return ('target',value)
+                self.modules['server_commands.argument_helpers'].OptionalTargetParam=target
+                with self.assertRaises(NativeRefusal):self.api.execute(request('cas.enter'))
+                self.assertEqual([],self.commands)
+                self.assertEqual(['enter','exit'],self.admission.scopes)
+
+    def test_cas_target_constructor_error_closes_scope_without_native_call(self):
+        self.admission.cas=True
+        def target(value):raise RuntimeError('fabricated target construction failure')
+        self.modules['server_commands.argument_helpers'].OptionalTargetParam=target
+        with self.assertRaises(RuntimeError):self.api.execute(request('cas.enter'))
+        self.assertEqual([],self.commands)
+        self.assertEqual(['enter','exit'],self.admission.scopes)
+
+    def test_cas_native_error_closes_scope_without_retry(self):
+        self.admission.cas=True
+        def failed():raise RuntimeError('fabricated native failure')
+        self.on_cas=failed
+        with self.assertRaises(RuntimeError):self.api.execute(request('cas.enter'))
+        self.assertEqual([('cas',('target','30'),5)],self.commands)
+        self.assertEqual(['enter','exit'],self.admission.scopes)
 
     def test_companion_native_source_parses_as_python37(self):
         source=(SOURCE/'foundry_companion'/'native.py').read_text()

@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 587 tests collected, 574 passed, 13 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 619 tests collected, 606 passed, 13 Windows-only fixture tests skipped. Without that optional interpreter path, four additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -226,3 +226,27 @@ proof or production admission. The exact-source wheel also passed an isolated
 no-site-packages import, the synthetic 14-step workflow, passive journal status
 and unconditional public native-input refusal. Run:
 https://github.com/Herbertofury/Sims4Foundry/actions/runs/41818794815
+
+A further cross-component review reproduced a late-success deadline defect in
+the original transport. Six deterministic regressions now cover I/O completing
+after the absolute deadline, late parsing, retained server history and client
+journal uncertainty without replay. They assert exact failures, one send or no
+admission where applicable, and cleanup. Three server cases also pass on actual
+Python 3.7; three current-client cases intentionally skip there.
+
+Native CAS regressions reproduced missing Sim-ID revalidation and target-helper
+construction after the final context check. Target preparation now precedes the
+last exact save/client/zone/household/Sim/instance checks inside the preservation
+scope. Direct native calls also require captured host-declared session/process
+binding and full mutation save preconditions before game service access. Typed
+request and admission observation views are detached; host declarations and
+arbitrary trusted Python hooks do not establish OS identity or live authority.
+These changes remain uninstalled source, with no added game qualification.
+
+The final native suite has 45 passing tests on both current Python and actual
+Python 3.7. It additionally distinguishes admission TTL types (`5` versus `5.0`)
+and performs one bounded post-admission context read, without another admission
+call. Twenty-one final-hook context-drift cases across speed, quit and CAS now
+refuse before native dispatch; CAS scopes unwind. Independent review and the
+combined local suite above pass. Exact-head Windows/Linux CI remains required
+for this source update.

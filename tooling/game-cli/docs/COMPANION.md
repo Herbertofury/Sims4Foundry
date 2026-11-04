@@ -31,9 +31,13 @@ Sims profile, connected to a running game, or used to alter a save.
 - `companion-src/foundry_companion/native.py`: owner-thread-only observed status,
   native clock-speed call plus independent readback, exact instanced-Sim CAS entry
   call behind an additional preservation scope, and ordinary quit-menu request.
-  Admission denies by default. Command modules load only after mutation/context
-  admission, with another check afterward. CAS visibility, save persistence and
-  actual process exit are never inferred from a call returning.
+  Admission denies by default. An explicit captured session/process-epoch binding
+  is required even for observation; every mutation additionally requires exact
+  zone/household/save context before reads or command imports. Command modules
+  load only after mutation/context admission, with another check afterward. CAS
+  target construction is inside the preservation scope and precedes the final
+  fresh context and exact Sim ID/object/instance/household checks. CAS visibility,
+  save persistence and actual process exit are never inferred from a call returning.
 - `src/sims4foundry_cli/process_lease.py`: fixed per-user Windows Local mutex keyed
   by PID and creation FILETIME, retained query-only process handle, exact fresh
   identity checks, fail-fast contention and recursive-owner rejection. It only
@@ -61,6 +65,37 @@ transaction guards. Removing them is not a neutral adapter. The new CAS branch
 therefore requires a separately reviewed preservation scope and cannot perform
 full-edit, accept/cancel, part edits or any Build transaction. Normal quit merely
 requests its menu and still needs independently observed choices/process closure.
+
+## Native host declaration and callback boundaries
+
+A future qualified host must explicitly provide `session_id` and a typed
+`ProcessEpoch` to `NativeAPI`. Leaving both unset constructs an inert adapter;
+execution refuses before admission callbacks, service reads, command imports or
+preservation scopes. Partial or malformed configured bindings are rejected at
+construction. Requests must match the captured session, PID and creation FILETIME.
+The adapter copies the configured identity into primitive values, so changing the
+caller-owned epoch object cannot rebind it. The queue's legacy pure test interface
+still permits missing epoch/save fields; the native boundary does not.
+
+This is only a host-supplied declaration. It is not an OS identity proof, a profile
+lease, a durable journal or live authority. The host must independently validate
+the process lifetime and provide current operation-specific admission. Providing
+matching identity fields does not override the default-deny admission provider.
+
+At execution entry the adapter copies all typed request, argument and epoch
+values. Read/mutation admission receives detached request views, and mutation
+admission also receives a detached observation with its own error map. Retained
+views cannot rewrite the adapter's previously checked baselines. A hook that
+changes the request view it is currently asked to admit is refused before work
+continues. After each mutation admission hook, one bounded fresh read must match
+the same running Live zone/household/client/save context. This catches accidental
+hook side effects without another admission call or an admission loop.
+CAS preservation receives a detached request but the actual Sim/client,
+then target preparation and fresh read/mutation admission occur inside the scope.
+Refusals and constructor/native errors unwind that scope; native errors are not
+retried. These local alias defenses are not a sandbox for untrusted Python hooks:
+services, command modules and preservation/admission providers remain trusted,
+independently reviewed integration code.
 
 ## Integration still required
 

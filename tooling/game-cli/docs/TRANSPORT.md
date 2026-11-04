@@ -74,6 +74,13 @@ Fragmentation and slow-drip input cannot renew it. At most eight workers exist
 (default four); excess sockets are closed without admission. Frames, worker
 tracking, retained intent, queued work and results are bounded.
 
+The deadline is rechecked after blocking I/O, final EOF and payload validation,
+not only before those steps. A complete response arriving or parsing too late
+does not become successful evidence. A late send may already have transmitted
+bytes: it is not retried, and an admitted server request retains its history and
+mutation uncertainty. The client journal likewise records an uncertain exchange
+and only permits receipt reads of the exact original intent.
+
 Python cannot preempt an injected host hook that hangs. Worker hooks must honor
 the supplied deadline, never call game APIs, and perform only bounded security
 and durable-intent work. The owner admission hook must do bounded local/native
@@ -84,8 +91,11 @@ provider obligations, not capabilities established by these synthetic tests.
 
 The transport preserves PID plus creation epoch, session, exact operation and
 arguments, TTL, zone, household, save slot and save GUID into the immutable queue
-request. The native adapter now compares explicit save preconditions before
-command imports and again with its existing fresh context checks. A trusted host
+request. The native adapter additionally requires a matching captured session and
+process-epoch declaration plus full mutation save context before game access,
+and compares those save preconditions before command imports and again with its
+fresh context checks. This declaration is not observed OS identity or live
+authority. A trusted host
 must independently verify current process lifetime and profile admission; caller
 claims cannot establish them.
 
