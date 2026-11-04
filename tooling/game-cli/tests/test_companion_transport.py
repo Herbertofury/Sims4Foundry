@@ -4,6 +4,7 @@ This file also runs under isolated Python 3.7. Tests prove transport behavior,
 not authentication or game qualification; FixturePolicy is intentionally fake.
 """
 import ast
+import errno
 from copy import deepcopy
 from pathlib import Path
 import os
@@ -77,6 +78,20 @@ class FixturePolicy(transport.DenyHostPolicy):
         return self.allow_dispatch
 
 
+def expected_peer_close(error):
+    """Only OS variants of deliberate early peer closure, never other failures.
+
+    Windows may expose WinSock abort/reset/not-connected as winerror or errno.
+    These fixture allowances are opt-in and never relax production transport.
+    """
+    if isinstance(error, TimeoutError):
+        return False
+    return (isinstance(error, OSError)
+            and (error.errno in (errno.ECONNRESET, errno.ECONNABORTED, errno.ENOTCONN, errno.EPIPE,
+                                 10053, 10054, 10057)
+                 or getattr(error, 'winerror', None) in (10053, 10054, 10057)))
+
+
 class TransportTests(unittest.TestCase):
     def setUp(self):
         self.policy = FixturePolicy()
@@ -100,7 +115,7 @@ class TransportTests(unittest.TestCase):
         self.addCleanup(connection.close)
         return connection
 
-    def read_reply(self, connection):
+    def read_reply(self, connection, allow_early_close=False):
         result = bytearray()
         try:
             while True:
@@ -109,24 +124,37 @@ class TransportTests(unittest.TestCase):
                     break
                 result.extend(chunk)
                 self.assertLessEqual(len(result), 65540)
-        except ConnectionResetError:
-            pass
+        except OSError as error:
+            if not allow_early_close or not expected_peer_close(error):
+                raise
+            # Validate any bytes already received below. An early close cannot
+            # turn a partial prefix/payload or extra response bytes into success.
         if not result:
             return None
         self.assertGreaterEqual(len(result), 4)
         self.assertEqual(len(result) - 4, struct.unpack('>I', result[:4])[0])
         return wire.decode_payload(bytes(result[4:]))
 
-    def send(self, value=None, raw=None, chunks=None):
+    def send_payload(self, connection, payload, chunks=None, allow_early_close=False):
+        try:
+            if chunks:
+                for start in range(0, len(payload), chunks):
+                    connection.sendall(payload[start:start + chunks])
+            else:
+                connection.sendall(payload)
+            connection.shutdown(socket.SHUT_WR)
+        except OSError as error:
+            if not allow_early_close or not expected_peer_close(error):
+                raise
+            # Never retry sendall/shutdown. Read once to retain validation of any
+            # reply bytes, rather than treating a write error as empty success.
+        return self.read_reply(connection, allow_early_close=allow_early_close)
+
+    def send(self, value=None, raw=None, chunks=None, allow_early_close=False):
         connection = self.connect()
         payload = wire.encode_frame(value) if raw is None else raw
-        if chunks:
-            for start in range(0, len(payload), chunks):
-                connection.sendall(payload[start:start + chunks])
-        else:
-            connection.sendall(payload)
-        connection.shutdown(socket.SHUT_WR)
-        return self.read_reply(connection)
+        return self.send_payload(connection, payload, chunks=chunks,
+                                 allow_early_close=allow_early_close)
 
     def assert_code(self, code, callback, *args, **kwargs):
         with self.assertRaises((QueueError, wire.ProtocolError)) as caught:
@@ -138,6 +166,74 @@ class TransportTests(unittest.TestCase):
         while not check() and time.monotonic() < until:
             time.sleep(.002)
         self.assertTrue(check(), 'Fixture event did not settle within two seconds.')
+
+    def test_fixture_helper_accepts_only_opted_in_peer_closure_at_each_socket_stage(self):
+        def variants():
+            result = [ConnectionResetError(errno.ECONNRESET, 'fixture reset'),
+                      ConnectionAbortedError(errno.ECONNABORTED, 'fixture abort'),
+                      OSError(errno.ENOTCONN, 'fixture not connected'),
+                      BrokenPipeError(errno.EPIPE, 'fixture broken pipe'),
+                      ConnectionAbortedError(10053, 'fixture WinSock abort'),
+                      OSError(10054, 'fixture WinSock reset'),
+                      OSError(10057, 'fixture WinSock not connected')]
+            windows = OSError('fixture winerror property')
+            windows.winerror = 10053
+            result.append(windows)
+            return result
+        for stage in ('sendall', 'shutdown', 'recv'):
+            for error in variants():
+                with self.subTest(stage=stage, error=repr(error)):
+                    connection = Mock()
+                    connection.recv.side_effect = [b'']
+                    getattr(connection, stage).side_effect = error
+                    self.assertIsNone(self.send_payload(connection, b'fixture', allow_early_close=True))
+                    if stage == 'sendall':
+                        connection.shutdown.assert_not_called()
+                    connection.sendall.assert_called_once()
+        self.assertEqual(0, self.server.queue_status().retained)
+        self.assertIsNone(self.server.owner_tick(Mock()))
+
+    def test_fixture_helper_does_not_allow_early_error_for_positive_exchange(self):
+        for stage in ('sendall', 'shutdown', 'recv'):
+            connection = Mock()
+            error = ConnectionAbortedError(errno.ECONNABORTED, 'fixture closure')
+            getattr(connection, stage).side_effect = error
+            with self.subTest(stage=stage), self.assertRaises(ConnectionAbortedError) as caught:
+                self.send_payload(connection, b'fixture')
+            self.assertIs(error, caught.exception)
+
+    def test_fixture_helper_propagates_timeout_generic_and_unrelated_errors(self):
+        for stage in ('sendall', 'shutdown', 'recv'):
+            for error in (socket.timeout('fixture timeout'), OSError(errno.EIO, 'fixture I/O error'),
+                          OSError('fixture unknown OS failure'),
+                          ConnectionRefusedError(errno.ECONNREFUSED, 'fixture refusal'),
+                          RuntimeError('fixture programmer failure')):
+                connection = Mock()
+                getattr(connection, stage).side_effect = error
+                with self.subTest(stage=stage, error=repr(error)), self.assertRaises(type(error)) as caught:
+                    self.send_payload(connection, b'fixture', allow_early_close=True)
+                self.assertIs(error, caught.exception)
+
+    def test_fixture_helper_keeps_partial_reply_integrity_after_any_early_close(self):
+        partials = (b'\x00\x00', struct.pack('>I', 8) + b'{', wire.encode_frame({'x': 1}) + b'x')
+        for stage in ('sendall', 'shutdown', 'recv', 'eof'):
+            for partial in partials:
+                connection = Mock()
+                error = ConnectionAbortedError(errno.ECONNABORTED, 'fixture closure')
+                connection.recv.side_effect = [partial, error if stage == 'recv' else b'']
+                if stage in ('sendall', 'shutdown'):
+                    getattr(connection, stage).side_effect = error
+                with self.subTest(stage=stage, partial=partial), self.assertRaises(AssertionError):
+                    self.send_payload(connection, b'fixture', allow_early_close=True)
+
+    def test_fixture_helper_validates_complete_reply_before_accepting_close_variant(self):
+        value = {'schema': 2, 'kind': 'error', 'code': 'fixture_refusal', 'outcome_known': False}
+        for closure in (b'', ConnectionResetError(errno.ECONNRESET, 'fixture reset'),
+                        ConnectionAbortedError(10053, 'fixture WinSock abort'),
+                        OSError(errno.ENOTCONN, 'fixture not connected')):
+            connection = Mock()
+            connection.recv.side_effect = [wire.encode_frame(value), closure]
+            self.assertEqual(value, self.read_reply(connection, allow_early_close=True))
 
     def test_import_and_construction_do_not_open_sockets_default_start_denied(self):
         with patch.object(transport.socket, 'socket', side_effect=AssertionError('unexpected socket')):
@@ -224,7 +320,7 @@ class TransportTests(unittest.TestCase):
     def test_peer_and_new_submission_default_denial_never_dispatch(self):
         self.start()
         self.policy.allow_peer = False
-        self.assertIsNone(self.send(submission()))
+        self.assertIsNone(self.send(submission(), allow_early_close=True))
         self.assertEqual(0, self.server.queue_status().retained)
         self.policy.allow_peer = True; self.policy.allow_submit = False
         response = self.send(submission())
@@ -272,22 +368,38 @@ class TransportTests(unittest.TestCase):
         self.start()
         frame = wire.encode_frame(submission())
         for suffix in (frame, b'\x00', b'junk'):
-            reply = self.send(raw=frame + suffix)
-            self.assertEqual('extra_frame', reply['code'])
+            reply = self.send(raw=frame + suffix, allow_early_close=True)
+            # Closing with an unread suffix may reset TCP and discard the
+            # attempted error frame. Any received bytes still pass strict
+            # complete-frame validation in read_reply; partial data never passes.
+            if reply is not None:
+                self.assertEqual({'schema': 2, 'kind': 'error', 'code': 'extra_frame',
+                                  'outcome_known': False}, reply)
             self.assertEqual(0, self.server.queue_status().retained)
+
+    def test_extra_frame_rejection_with_lost_error_reply_still_has_zero_admission(self):
+        self.start()
+        frame = wire.encode_frame(submission())
+        with patch.object(transport, '_send_one', side_effect=ConnectionResetError(errno.ECONNRESET, 'fixture reset')):
+            self.assertIsNone(self.send(raw=frame + frame, allow_early_close=True))
+        self.assertEqual(0, self.server.queue_status().retained)
+        self.assertEqual([], self.policy.submits)
+        native = Mock()
+        self.assertIsNone(self.server.owner_tick(native))
+        native.assert_not_called()
 
     def test_complete_frame_without_write_eof_is_never_admitted(self):
         self.start(connection_seconds=.07)
         connection = self.connect()
         connection.sendall(wire.encode_frame(submission()))
-        self.assertIsNone(self.read_reply(connection))
+        self.assertIsNone(self.read_reply(connection, allow_early_close=True))
         self.assertEqual(0, self.server.queue_status().retained)
 
     def test_truncated_and_oversized_frames_have_no_admission(self):
         self.start()
         frame = wire.encode_frame(submission())
         for raw in (b'', b'\x00', frame[:12], struct.pack('>I', 0), struct.pack('>I', 65537)):
-            reply = self.send(raw=raw)
+            reply = self.send(raw=raw, allow_early_close=True)
             self.assertTrue(reply is None or reply['kind'] == 'error')
             self.assertEqual(0, self.server.queue_status().retained)
 
@@ -307,10 +419,12 @@ class TransportTests(unittest.TestCase):
         for part in (b'\x00', b'\x00', b'\x01', b'\x00'):
             try:
                 connection.sendall(part)
-            except OSError:
+            except OSError as error:
+                if not expected_peer_close(error):
+                    raise
                 break
             time.sleep(.035)
-        self.assertIsNone(self.read_reply(connection))
+        self.assertIsNone(self.read_reply(connection, allow_early_close=True))
         self.assertLess(time.monotonic() - start, .4)
         self.assertEqual(0, self.server.queue_status().retained)
 
@@ -415,12 +529,7 @@ class TransportTests(unittest.TestCase):
         first = self.connect()
         self.assertTrue(self.policy.peer_seen.wait(1))
         second = self.connect()
-        second.sendall(wire.encode_frame(submission()))
-        try:
-            second.shutdown(socket.SHUT_WR)
-        except OSError:
-            pass
-        self.assertIsNone(self.read_reply(second))
+        self.assertIsNone(self.send_payload(second, wire.encode_frame(submission()), allow_early_close=True))
         self.assertEqual(1, len(self.policy.peers))
         self.assertEqual(0, self.server.queue_status().retained)
         first.close()
@@ -499,7 +608,7 @@ class TransportTests(unittest.TestCase):
         with patch.object(threading.Thread, 'start', start):
             connection = self.connect()
             self.wait_until(self.server._stop.is_set)
-            self.assertIsNone(self.read_reply(connection))
+            self.assertIsNone(self.read_reply(connection, allow_early_close=True))
         self.assertEqual(1, len(self.server._workers))
         self.assertFalse(self.server.shutdown())
         self.assertTrue(self.server._startup_uncertain.is_set())
@@ -528,7 +637,7 @@ class TransportTests(unittest.TestCase):
         with patch.object(threading, 'Thread', side_effect=construct):
             connection = self.connect()
             self.wait_until(self.server._stop.is_set)
-            self.assertIsNone(self.read_reply(connection))
+            self.assertIsNone(self.read_reply(connection, allow_early_close=True))
         self.assertEqual({}, self.server._workers)
         self.assertTrue(self.server.shutdown())
 
@@ -550,7 +659,7 @@ class TransportTests(unittest.TestCase):
         with patch.object(threading, 'Thread', side_effect=construct):
             connection = self.connect()
             self.wait_until(self.server._stop.is_set)
-            self.assertIsNone(self.read_reply(connection))
+            self.assertIsNone(self.read_reply(connection, allow_early_close=True))
         self.assertEqual({}, self.server._workers)
         self.assertTrue(self.server.shutdown())
 

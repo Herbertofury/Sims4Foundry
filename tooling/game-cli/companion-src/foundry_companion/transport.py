@@ -1,6 +1,7 @@
 """Explicit-lifecycle, bounded loopback bridge. Uninstalled and default denied.
 
-Import/construction starts nothing. No authentication implementation, credential,
+Import/construction starts nothing. This module supplies no peer authentication;
+separate explicit-key hooks do not provision credentials or admit a host. No
 bootstrap, scheduler, game import, native executor or durable journal ships here.
 A trusted host must independently authenticate the peer and authorize/record each
 operation through the policy seam; 127.0.0.1 and a digest are NOT authentication.

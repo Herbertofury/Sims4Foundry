@@ -4,7 +4,7 @@
 
 Passed locally:
 
-- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 421 tests collected, 412 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, one additional cross-runtime test skips.
+- Full suite with `FOUNDRY_COMPANION_PYTHON37` pointing to the isolated interpreter: 455 tests collected, 446 passed, 9 Windows-only fixture tests skipped. Without that optional interpreter path, two additional cross-runtime tests skip.
 - `python -m compileall -q src`: source compilation.
 - CLI help, capabilities and historical Apex AST inventory.
 - The included 14-step CAS/Live/Build/save/reload/exit workflow, explicitly synthetic.
@@ -113,5 +113,24 @@ Python 3.7.17 using `-B -S -s`, the queue/native/transport suite runs 116 tests:
 precedes started; every later exception remains unknown. Reviews prompted fixes
 for listener loss, thread/socket startup and cleanup uncertainty, and exclusive
 Windows listener binding. The new native Windows collision test still needs CI.
-No authentication provider, live host admission, durable journal integration or
-game bootstrap was installed or qualified. See [TRANSPORT.md](TRANSPORT.md).
+No live host admission, durable journal integration or game bootstrap was installed
+or qualified. See [TRANSPORT.md](TRANSPORT.md).
+
+At transport head a3ad5f4e205057324d705415a1a333e1348384d7, Windows's actual
+exclusive-bind collision test passed. CI exposed negative-fixture assumptions
+about intentionally closed sockets: Linux may report ENOTCONN at shutdown and
+Windows may report connection-aborted rather than connection-reset. The fixture
+correction handles only explicitly opted-in closure errors, retains all zero-
+admission/no-dispatch checks, and still rejects timeouts, unrelated errors and
+partial/trailing response bytes. Six deterministic fixture regressions were
+added; production transport behavior was not relaxed.
+
+The peer-hook batch adds 28 authentication tests. All pass on the current
+interpreter with the optional separate-Python-3.7 server test enabled. Real
+Python 3.7 runs 22 portable cases and skips six current-client cases. Tests cover
+full pinned golden messages, mutual proofs, wrong keys, replay/reflection,
+two-connection relay rejection, malformed frames, absolute deadlines, secret
+redaction and no application access before authentication. This is an internal
+source/regression review, not an external cryptographic audit or game qualification.
+Secure key provisioning and qualified host/channel admission remain separate.
+The combined correction/authentication source still requires its exact-head CI.

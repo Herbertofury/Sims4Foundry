@@ -17,12 +17,14 @@ Both server and client default deny. The server requires a separately reviewed
 host policy to authorize listener creation, authenticate each exact peer socket,
 authorize and durably record each new submission, then freshly admit dispatch on
 the owner thread. The client also requires an independent server-authorization
-hook before sending its request. No credentials or real authentication/identity
-provider are generated or implemented here. A policy that merely returns True is
-not security; the tests do that only with fabricated data and isolated sockets.
+hook before sending its request. Optional [explicit-key peer hooks](PEER_AUTH.md)
+implement mutual key-possession proofs without provisioning credentials or
+establishing OS/game identity. No production host authorization policy ships.
+A policy that merely returns True is not security; the original transport tests
+do that only with fabricated data and isolated sockets.
 
 **Loopback, PID/creation epoch, session IDs and hashes do not authenticate anyone.**
-The integration still lacks authenticated channel/peer policy, durable journal
+The integration still lacks securely provisioned and qualified channel/peer policy, durable journal
 reconciliation, exact profile/process admission, reviewed provider qualification,
 owner scheduler and zone lifecycle hooks. Native admission remains independently
 default denied. Wire JSON cannot provide those authorities or enable the hooks.

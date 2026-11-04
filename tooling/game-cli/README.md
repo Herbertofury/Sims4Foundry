@@ -174,8 +174,10 @@ See [Architecture](docs/ARCHITECTURE.md), [Validation](docs/VALIDATION.md) and
 The `companion-src/foundry_companion` sources are a Python-3.7-compatible bounded
 owner-thread queue, narrow native call bindings, and an explicit-lifecycle bounded
 loopback transport. Imports and construction start no server or hooks. Server and
-client default deny without independent host/peer authorization providers, which
-are not implemented. Tests use only fabricated services and isolated sockets.
+client default deny without independent host/peer authorization. Optional mutual
+HMAC peer hooks accept an explicitly provisioned session key; no key provisioning
+or production host policy is supplied. Tests use only public test keys, fabricated
+services and isolated sockets.
 They are not an installable mod or a working CAS/Build controller. See
 [COMPANION.md](docs/COMPANION.md) for implemented boundaries and missing integration.
 The unchanged v1 client protocol is wrapped by a separate schema-2 transport
@@ -183,6 +185,9 @@ contract carrying exact TTL/process/save context. Receipt-only reconnects never
 requeue an operation. A returned adapter assertion is not independent game evidence.
 See [TRANSPORT.md](docs/TRANSPORT.md). Neither this transport nor the cooperative
 Windows process lease bypasses live qualification or resolves earlier actions.
+See [PEER_AUTH.md](docs/PEER_AUTH.md) for the key-possession proof, exact socket
+binding and remaining security limits. It is not encrypted application transport
+or proof that a socket belongs to the game.
 
 ## Passive process discovery
 

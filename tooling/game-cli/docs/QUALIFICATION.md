@@ -18,7 +18,7 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | Windows process/window inspection | Query-only implementation | Contract tests and native Windows CI fixture | Pending current game test |
 | WGC capture | Pinned helper implementation | Mock helper plus real PNG validation | Pending current game test |
 | No-Apex click/key/scroll/drag | Pure packet plans and injected runner only | Synthetic guard tests and native Windows fixture message receipts | No |
-| Foundry semantic game bridge | Uninstalled typed queue, narrow native bindings and default-denied socket transport; no bootstrap/authentication provider | Fabricated services and real isolated sockets on actual Python 3.7 | No |
+| Foundry semantic game bridge | Uninstalled typed queue, narrow native bindings, default-denied socket transport and explicit-key peer hooks; no bootstrap/admitted host | Fabricated services and real isolated sockets on actual Python 3.7 | No |
 | No-Apex launch/entry/save/load/exit | Launch metadata preparation only | Synthetic EA metadata tests | No |
 
 ## Required controlled validation
@@ -65,7 +65,7 @@ Only after this evidence is reviewed should a separate single-action test begin.
 
 ## Still required engineering
 
-- Complete the independently admitted, authenticated mod-neutral host around the source-only transport/owner queue/native bindings. Process epoch and zone/household/save preconditions are carried across the boundary, but live admission, authentication, scheduling and durable reconciliation are not implemented.
+- Complete the independently admitted mod-neutral host around the source-only transport/owner queue/native bindings. Process epoch and zone/household/save preconditions are carried across the boundary; peer key-possession hooks exist, but secure key provisioning, qualified channel/peer policy, live admission, scheduling and durable reconciliation are not implemented.
 - A separately qualified external menu/input provider, including scroll/drag/keys.
 - Integrate the cooperative process-lifetime lease with a shared durable journal and detect nonparticipating user/Apex/other-tool interference. A lease alone does not authorize input.
 - Windows crash-durable pre-dispatch evidence ordering.

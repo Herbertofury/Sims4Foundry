@@ -16,6 +16,11 @@ Sims profile, connected to a running game, or used to alter a save.
   loopback socket bridge. Server and client default deny without independently
   established host/peer authorization hooks; no such production provider ships.
   See [TRANSPORT.md](TRANSPORT.md) for exact framing and security boundaries.
+- `companion-src/foundry_companion/peer_auth.py` and client `companion_auth.py`:
+  optional mutual HMAC-SHA256 peer hooks with explicit caller-owned keys, fresh
+  nonces, role separation and locally observed socket endpoint binding. No key
+  provisioning, host authorization, encrypted application channel or OS identity
+  claim is added. See [PEER_AUTH.md](PEER_AUTH.md).
 - `companion-src/foundry_companion/queue.py`: Python-3.7-compatible immutable
   requests, process epoch and exact zone/household/save preconditions, bounded TTL,
   pre-start owner admission and an irreversible uncertainty latch, 48 pending requests
@@ -62,8 +67,9 @@ requests its menu and still needs independently observed choices/process closure
 1. An admitted disposable profile, exact process lifetime, shared durable journal,
    authenticated bounded transport and version-scoped provider qualification.
    The new schema-2 transport preserves epoch, TTL and zone/household/save context
-   into the queue. Independent peer security, durable journaling and live host
-   authorization remain absent; caller JSON cannot establish authorization.
+   into the queue. Secure key provisioning, qualified channel/peer policy, durable
+   journaling and live host authorization remain absent; caller JSON or possession
+   of a shared key cannot establish operation authorization.
 2. Owner-thread bootstrap and zone lifecycle hooks that coexist with other mods;
    no game API may run on a network worker. The source-only listener has an explicit
    caller-controlled lifecycle and no automatic startup hook or scheduling.
