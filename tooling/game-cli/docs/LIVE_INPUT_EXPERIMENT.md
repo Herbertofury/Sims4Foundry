@@ -31,6 +31,11 @@ independent inspector only for the test's own PID, image and window; its key is
 DPAPI-protected and its SQLite anchor is cooperative. It leaves the journal
 awaiting readback and preserves the original fixture evidence directory; set
 `FOUNDRY_REGISTERED_FIXTURE_ROOT` to select its existing parent directory.
+`input_frame_evidence.capture` can also store one validated frame from the
+same active recorder, bound to the original pending journal intent. Its PNG,
+intent and completion receipt are retained locally. The operation sends no
+input and does not acknowledge the journal; it records receipt time only and
+does not establish capture time, causality, semantic state or game qualification.
 The parent is checked for named game/profile paths and existing reparse points
 before directory creation, but this path-based check does not prevent a
 concurrent replacement. Fixture records include local process and path details;

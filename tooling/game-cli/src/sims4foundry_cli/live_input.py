@@ -141,7 +141,7 @@ class LiveInputBackend:
                  "foreground_changed", "The foreground baseline changed.")
         return value
 
-    def verify_recording(self):
+    def _recording_frame(self):
         self._context()
         frame = self._recorder.sample()
         now = time.monotonic()
@@ -153,7 +153,26 @@ class LiveInputBackend:
                  and (frame.sequence != self._frame_sequence or frame.received_at == self._frame_time),
                  "recording_unverified", "Recorder sequence or receipt freshness is unavailable.")
         self._frame_sequence, self._frame_time = frame.sequence, frame.received_at
+        return frame
+
+    def verify_recording(self):
+        self._recording_frame()
         return True
+
+    def sample_frame(self):
+        """Return a detached frame from the original active recorder."""
+        from hashlib import sha256
+        import io
+        from .wgc_recorder import MAX_FRAME_BYTES, _read_frame
+        frame = self._recording_frame()
+        _require(type(frame.png) is bytes and 0 < len(frame.png) <= MAX_FRAME_BYTES
+                 and type(frame.sha256) is str and sha256(frame.png).hexdigest() == frame.sha256,
+                 "recording_unverified", "Recorded frame bytes are invalid or changed.")
+        stream = io.BytesIO(frame.png)
+        raw, shape = _read_frame(stream)
+        _require(not stream.read(1) and raw == frame.png and shape == (frame.width,frame.height),
+                 "recording_unverified", "Recorded frame dimensions or structure are invalid.")
+        return Frame(frame.epoch,frame.sequence,frame.received_at,frame.sha256,frame.width,frame.height,raw)
 
     def verify_input_context(self, packet):
         self._context()

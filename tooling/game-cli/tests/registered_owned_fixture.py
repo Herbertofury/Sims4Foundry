@@ -18,7 +18,7 @@ import time
 import uuid
 from unittest import mock
 
-from sims4foundry_cli import (guarded_input, input_journal, live_input, native_input, process_exit,
+from sims4foundry_cli import (guarded_input, input_frame_evidence, input_journal, live_input, native_input, process_exit,
                               registered_input, session_registry, windows, windows_registry_key, wgc_recorder)
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Point, encode_click
@@ -119,6 +119,10 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                     test.assertIsNotNone(changed,'No expected white fixture pixel was received')
                     test.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],
                                      state['events'])
+                    evidence=input_frame_evidence.capture(journal,'3'*32,backend,root/'frame-evidence')
+                    test.assertEqual('frame_recorded',evidence['outcome'])
+                    test.assertFalse(evidence['capture_time_verified'])
+                    test.assertFalse(evidence['acknowledged'])
                 result=lease.close()
                 closed = result.get('outcome') == 'provider_reported_closed'
                 test.assertTrue(closed)
