@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from sims4foundry_cli import cli, independent_live_service, input_journal, live_input, native_input, process_exit, registered_input
+from sims4foundry_cli import cli, independent_live_owner, independent_live_service, input_journal, live_input, native_input, process_exit, registered_input
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.session_registry import SessionRegistry
 from test_guarded_input import identity
@@ -33,6 +33,8 @@ class LiveServiceTests(unittest.TestCase):
         original = {'identity':identity(),'session_id':'1'*32}
         for item in (mock.patch.object(independent_live_service.independent_session,'_open',
                                        return_value=(original,self.registry,self.journal,self.registry.inspect())),
+                     mock.patch.object(independent_live_service,'_fixture_pid',return_value=identity()['pid']),
+                     mock.patch.object(independent_live_owner,'_fixture_pid',return_value=identity()['pid']),
                      mock.patch.object(native_input,'_NativeApi',return_value=self.api),
                      mock.patch.object(process_exit,'_WindowsApi',return_value=FakeWitnessApi()),
                      mock.patch.object(live_input,'_NativeApi',return_value=self.api),
@@ -46,7 +48,8 @@ class LiveServiceTests(unittest.TestCase):
         raw = b''.join(json.dumps(command).encode()+b'\n' for command in commands)
         sink = sink or io.StringIO()
         result = independent_live_service.serve(self.root/'authority',self.session,'4'*32,'ffmpeg.exe','a'*64,
-                                                input_stream=io.BytesIO(raw),output_stream=sink)
+                                                input_stream=io.BytesIO(raw),output_stream=sink,
+                                                _fixture_admission=independent_live_service._OWNED_FIXTURE_ADMISSION)
         return result,[json.loads(row) for row in sink.getvalue().splitlines()]
 
     def test_single_owner_click_status_and_explicit_stop(self):
@@ -126,6 +129,36 @@ class LiveServiceTests(unittest.TestCase):
             api.assert_not_called()
         self.assertEqual('live_owner_unqualified',json.loads(output.getvalue())['code'])
         self.assertFalse((self.session/'live-owner-intent.json').exists())
+        output = io.StringIO()
+        with redirect_stdout(output), mock.patch.object(native_input,'_NativeApi') as api:
+            self.assertEqual(2,cli.main([*args,'--allow-experimental']))
+            api.assert_not_called()
+        self.assertEqual('live_authority_unqualified',json.loads(output.getvalue())['code'])
+        self.assertFalse((self.session/'live-owner-intent.json').exists())
+
+    def test_lost_stop_intent_reply_fences_later_click_and_capture(self):
+        write = independent_live_service.new_json
+        def lose_stop_reply(path, value):
+            write(path,value)
+            if path.name == 'live-owner-stop-intent.json': raise OSError('lost fixture reply')
+        click = {'op':'click','request_id':'2'*32,'x':20,'y':30,'expectation':{'mode':'cas'},
+                 'evidence_directory':str(self.root/'evidence')}
+        with mock.patch.object(independent_live_service,'new_json',side_effect=lose_stop_reply):
+            result, rows = self.run_service([{'op':'stop','abandon':True},click,
+                                             {'op':'capture_frame','request_id':'2'*32,
+                                              'evidence_directory':str(self.root/'frame')},
+                                             {'op':'status'}])
+        self.assertEqual('live_owner_unresolved',rows[1]['code'])
+        self.assertEqual('live_owner_stopping',rows[2]['code'])
+        self.assertEqual('live_owner_stopping',rows[3]['code'])
+        self.assertEqual('owner_status',rows[4]['outcome'])
+        self.assertTrue(rows[4]['stop_attempted'])
+        self.assertEqual([],self.api.posts)
+        self.assertEqual('owner_input_closed',result['outcome'])
+        retained = independent_live_service._UNRESOLVED[-1]
+        retained['lease'].close()
+        retained['api'].close(retained['image'])
+        independent_live_service._UNRESOLVED.remove(retained)
 
 
 if __name__ == '__main__': unittest.main()

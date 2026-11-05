@@ -37,7 +37,11 @@ required before this can become a working game-control workflow.
 
 `independent_live_owner.LiveOwner` is an experimental Python composition for a
 host which already owns the exact registry, journal and retained process
-witness. `click_once` accepts one explicit client-area click, attempts it through
+witness. Live admission is currently denied: separate authorities can reserve
+the same lifetime and bypass each other's pending records. A private test-only
+admission permits only the current test process and is not a security boundary
+against arbitrary same-user Python. Under that fixture admission, `click_once`
+accepts one explicit client-area click, attempts it through
 the existing durable input path, and records a passive WGC frame. It reserves
 the shared input attempt before recorder setup; setup failure stays pending.
 Existing request IDs are refused before the native sender is opened; an
@@ -49,16 +53,20 @@ without another input. If cleanup is interrupted or unconfirmed, do not retry
 it or reopen a sender. No input acknowledgment, UI transition,
 semantic state or game qualification is claimed. Its owner must remain on the
 same thread and must independently manage witness acquisition and lifetime.
-The installed CLI exposes a foreground, newline-delimited JSON service:
+The installed CLI includes a foreground, newline-delimited JSON service
+interface. It currently returns `live_authority_unqualified` before opening a
+session, process or profile, even with the experimental opt-in. The syntax
+below describes the interface for future qualification; it is not a working
+game-control command:
 
 ```text
 foundry-game experimental-live-owner --authority AUTHORITY_DIR --session SESSION_DIR --witness-id 32_LOWERCASE_HEX --ffmpeg FFMPEG.exe --ffmpeg-sha256 64_LOWERCASE_HEX --allow-experimental
 ```
 
-The session must already have been initialized against the exact selected
-identity. This command retains an image pin and process witness for that
-identity; it does not start the game or prepare a profile. After its ready
-message, send one JSON object per line, for example:
+For an admitted owned-process fixture, the session must already be initialized
+against the exact selected identity. The fixture retains an image pin and
+process witness; it does not start the game or prepare a profile. After its
+ready message, it accepts one JSON object per line, for example:
 
 ```json
 {"op":"status"}
@@ -75,9 +83,16 @@ sequence of game operations. A stop with `abandon:true` makes one cleanup
 attempt and closes the original witness; it does not resolve pending input,
 save or quit the game, or prove OS release. Loss of the console or process
 does not recover the witness after restart. An owner-intent record prevents a
-second acquisition through this session; inspect it and the original journal
-after an uncertain start or response. The service has no cross-process client
-authentication and must not be treated as a production authority.
+second acquisition through this session; a fresh authority can bypass that
+reservation, so this is not global replay prevention. Inspect the original
+marker and journal after an uncertain start or response. The marker is
+published before acquisition, but Windows directory power-loss durability is
+not established. Quarantine retains objects only inside the same Python
+process: EOF, stdout loss, interruption or process exit can lose the witness,
+and FFmpeg descendant cleanup is not established. A startup interruption may
+bypass the formatted error; a stop interruption may leave release unconfirmed.
+The service has no cross-process client authentication and must not be treated
+as a production authority.
 
 An opt-in owned-window fixture exercised this composition using real Windows
 message posting and WGC against the test's own Python process. The fixture

@@ -99,7 +99,8 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                 with mock.patch.object(independent_live_service.independent_session,'_open',
                                        return_value=(intent,registry,journal,registry.inspect())):
                     result = independent_live_service.serve(root/'unused-authority',root,'2'*32,ffmpeg,ffmpeg_hash,
-                                                            input_stream=source,output_stream=sink)
+                                                            input_stream=source,output_stream=sink,
+                                                            _fixture_admission=independent_live_service._OWNED_FIXTURE_ADMISSION)
                 rows = [json.loads(line) for line in sink.getvalue().splitlines()]
                 test.assertEqual('experimental_owner_ready',rows[0]['outcome'])
                 test.assertEqual('frame_recorded',rows[1]['outcome'])
@@ -121,7 +122,8 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
             try:
                 packets=encode_click(Point(20,30),ClientBounds(target['client_width'],target['client_height']))
                 if os.environ.get('FOUNDRY_WGC_LIVE_OWNER_TEST') == '1':
-                    owner = independent_live_owner.LiveOwner(registry,journal,witness,ffmpeg,ffmpeg_hash)
+                    owner = independent_live_owner.LiveOwner(registry,journal,witness,ffmpeg,ffmpeg_hash,
+                                  _fixture_admission=independent_live_owner._OWNED_FIXTURE_ADMISSION)
                     retained.append(owner)
                     result = owner.click_once('3'*32,20,30,expected_observation={'fixture':'white'},
                                               evidence_directory=root/'frame-evidence')

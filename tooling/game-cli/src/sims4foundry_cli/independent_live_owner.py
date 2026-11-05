@@ -7,6 +7,7 @@ UI transition, game state, save, or capture time. There is no restart recovery.
 """
 import threading
 import re
+import os
 
 from . import input_frame_evidence, input_journal, registered_input
 from .errors import FoundryError
@@ -17,15 +18,26 @@ from .session_registry import SessionRegistry
 from .session_witness import SessionWitness
 
 _UNRESOLVED_SENDERS = []
+_OWNED_FIXTURE_ADMISSION = object()
+
+
+def _fixture_pid():
+    return os.getpid()
 
 
 class LiveOwner:
     """One original thread, retained witness and cooperative journal/registry."""
-    def __init__(self, registry, journal, witness, ffmpeg, ffmpeg_sha256):
+    def __init__(self, registry, journal, witness, ffmpeg, ffmpeg_sha256, *, _fixture_admission=None):
+        if _fixture_admission is not _OWNED_FIXTURE_ADMISSION:
+            raise FoundryError('live_authority_unqualified',
+                               'Live admission is disabled until cross-workspace authority is qualified.',
+                               input_attempted=False,game_qualified=False)
         if (type(registry) is not SessionRegistry or type(journal) is not input_journal.InputJournal
                 or type(witness) is not SessionWitness or witness._registry is not registry):
             raise FoundryError('live_owner_binding', 'Original registry, journal and witness are required.')
         registered_input._check(registry,journal)
+        if journal.session['target']['pid'] != _fixture_pid():
+            raise FoundryError('live_fixture_only', 'Only this test process may be selected by the fixture admission.')
         self._registry, self._journal, self._witness = registry, journal, witness
         self._ffmpeg, self._ffmpeg_sha256 = ffmpeg, ffmpeg_sha256
         self._thread = threading.current_thread()

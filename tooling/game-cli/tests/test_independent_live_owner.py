@@ -32,12 +32,14 @@ class IndependentLiveOwnerTests(unittest.TestCase):
         self.witness.acquire()
         self.api = FakeApi()
         for item in (mock.patch.object(live_input,'_NativeApi',return_value=self.api),
+                     mock.patch.object(independent_live_owner,'_fixture_pid',return_value=identity()['pid']),
                      mock.patch.object(live_input.process_lease,'process_lease',return_value=FakeLease()),
                      mock.patch.object(live_input,'WgcRecorder',PngRecorder),
                      mock.patch.object(live_input,'os',SimpleNamespace(name='nt'))):
             item.start()
             self.addCleanup(item.stop)
-        self.owner = independent_live_owner.LiveOwner(self.registry,self.journal,self.witness,'ffmpeg.exe','a'*64)
+        self.owner = independent_live_owner.LiveOwner(self.registry,self.journal,self.witness,'ffmpeg.exe','a'*64,
+                           _fixture_admission=independent_live_owner._OWNED_FIXTURE_ADMISSION)
         def close_original():
             if self.owner._backend_open and not self.owner._close_attempted:
                 self.owner.close_sender()
@@ -46,6 +48,17 @@ class IndependentLiveOwnerTests(unittest.TestCase):
     def click(self, request='2'*32, output='evidence'):
         return self.owner.click_once(request,20,30,expected_observation={'mode':'cas'},
                                      evidence_directory=self.root/output)
+
+    def test_live_admission_is_denied_and_fixture_is_same_process_only(self):
+        with self.assertRaises(FoundryError) as error:
+            independent_live_owner.LiveOwner(self.registry,self.journal,self.witness,'ffmpeg.exe','a'*64)
+        self.assertEqual('live_authority_unqualified',error.exception.code)
+        with mock.patch.object(independent_live_owner,'_fixture_pid',return_value=999):
+            with self.assertRaises(FoundryError) as error:
+                independent_live_owner.LiveOwner(self.registry,self.journal,self.witness,'ffmpeg.exe','a'*64,
+                    _fixture_admission=independent_live_owner._OWNED_FIXTURE_ADMISSION)
+        self.assertEqual('live_fixture_only',error.exception.code)
+        self.assertEqual([],self.api.posts)
 
     def test_click_records_frame_without_ack_and_blocks_replay_and_next_input(self):
         result = self.click()
@@ -77,7 +90,8 @@ class IndependentLiveOwnerTests(unittest.TestCase):
         self.assertTrue(error.exception.details['no_replay'])
         self.assertEqual('attempt',self.registry.inspect()['events'][-1]['kind'])
         self.assertEqual([],self.api.posts)
-        new_owner = independent_live_owner.LiveOwner(self.registry,self.journal,self.witness,'ffmpeg.exe','a'*64)
+        new_owner = independent_live_owner.LiveOwner(self.registry,self.journal,self.witness,'ffmpeg.exe','a'*64,
+                           _fixture_admission=independent_live_owner._OWNED_FIXTURE_ADMISSION)
         with mock.patch.object(independent_live_owner,'LiveInputBackend') as backend:
             with self.assertRaises(FoundryError):
                 new_owner.click_once('3'*32,20,30,expected_observation={'mode':'cas'},
@@ -125,7 +139,8 @@ class IndependentLiveOwnerTests(unittest.TestCase):
 
     def test_existing_request_is_refused_before_opening_backend(self):
         self.click()
-        new_owner = independent_live_owner.LiveOwner(self.registry,self.journal,self.witness,'ffmpeg.exe','a'*64)
+        new_owner = independent_live_owner.LiveOwner(self.registry,self.journal,self.witness,'ffmpeg.exe','a'*64,
+                           _fixture_admission=independent_live_owner._OWNED_FIXTURE_ADMISSION)
         with mock.patch.object(independent_live_owner,'LiveInputBackend') as backend:
             with self.assertRaises(FoundryError):
                 new_owner.click_once('2'*32,20,30,expected_observation={'mode':'cas'},

@@ -4,6 +4,7 @@ This is not an authenticated cross-process service, a game-qualified observer,
 or a restart recovery mechanism. It does not launch a game or access profiles.
 """
 import json
+import os
 import re
 import sys
 
@@ -15,10 +16,20 @@ from .session_witness import SessionWitness
 
 MAX_COMMAND = 32768
 _UNRESOLVED = []
+_OWNED_FIXTURE_ADMISSION = object()
 
 
-def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream=None, output_stream=None):
+def _fixture_pid():
+    return os.getpid()
+
+
+def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream=None, output_stream=None,
+          _fixture_admission=None):
     """Retain a selected witness while processing bounded JSON commands on stdin."""
+    if _fixture_admission is not _OWNED_FIXTURE_ADMISSION:
+        raise FoundryError('live_authority_unqualified',
+                           'Live admission is disabled until a single cross-workspace authority is qualified.',
+                           input_attempted=False,game_qualified=False)
     if (not input_journal._token(witness_id) or type(ffmpeg) is not str or not ffmpeg
             or type(ffmpeg_sha256) is not str or not re.fullmatch(r'[0-9a-f]{64}',ffmpeg_sha256)):
         raise FoundryError('live_owner_arguments', 'An exact witness ID and pinned FFmpeg image are required.')
@@ -26,6 +37,8 @@ def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream
     if len(state['events']) != 1 or state['events'][0].get('kind') != 'session':
         raise FoundryError('live_owner_unresolved', 'An unused original session is required; do not reacquire.')
     target = input_journal._target(intent['identity'])
+    if target['pid'] != _fixture_pid():
+        raise FoundryError('live_fixture_only', 'Only this test process may be selected by the fixture admission.')
     identity = {key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
     marker = external_path(session)/'live-owner-intent.json'
     try:
@@ -33,8 +46,8 @@ def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream
                          'target':identity,'ffmpeg_sha256':ffmpeg_sha256,'experimental':True})
     except FileExistsError:
         raise FoundryError('live_owner_unresolved', 'Original owner was already attempted; inspect without reacquiring.') from None
-    # The marker is durable before either an image pin or process handle is
-    # acquired. Keep every successfully returned owner strongly referenced.
+    # The marker is published before either an image pin or process handle is
+    # acquired. Windows power-loss durability is not established.
     retained = {'api':None,'image':None,'provider':None,'lease':None,'owner':None}
     _UNRESOLVED.append(retained)
     try:
@@ -47,7 +60,8 @@ def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream
         witness = SessionWitness(registry,provider,identity,witness_id)
         lease = witness.acquire()
         retained['lease'] = lease
-        owner = independent_live_owner.LiveOwner(registry,journal,witness,ffmpeg,ffmpeg_sha256)
+        owner = independent_live_owner.LiveOwner(registry,journal,witness,ffmpeg,ffmpeg_sha256,
+                                                _fixture_admission=independent_live_owner._OWNED_FIXTURE_ADMISSION)
         retained['owner'] = owner
     except Exception as error:
         code = error.code if isinstance(error,FoundryError) else None
@@ -74,10 +88,15 @@ def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream
             if type(value) is not dict or type(value.get('op')) is not str:
                 raise FoundryError('live_owner_protocol', 'An exact command object is required.')
             operation = value['op']
+            if stop_attempted and operation not in ('status','input_status'):
+                raise FoundryError('live_owner_stopping',
+                                   'Stop was attempted; inspect original state without further dispatch or cleanup.',
+                                   no_replay=True)
             if operation == 'status' and set(value) == {'op'}:
                 current = registry.inspect()
                 result = {'outcome':'owner_status','registry_pending':bool(current['events'] and current['events'][-1]['kind']=='attempt'),
-                          'sender_retained':owner._backend_open,'acknowledged':False,'game_qualified':False}
+                          'sender_retained':owner._backend_open,'stop_attempted':stop_attempted,
+                          'acknowledged':False,'game_qualified':False}
             elif operation == 'input_status' and set(value) == {'op','request_id'}:
                 result = {'outcome':'input_status','input':journal.status(value['request_id']),
                           'acknowledged':False,'game_qualified':False}
