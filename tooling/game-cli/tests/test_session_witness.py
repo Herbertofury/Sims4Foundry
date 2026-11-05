@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from sims4foundry_cli.errors import FoundryError
+from sims4foundry_cli.io import digest, new_json
 from sims4foundry_cli.process_exit import WAIT_TIMEOUT
 from sims4foundry_cli.retained_process_witness import RetainedProcessRegistry
 from sims4foundry_cli.session_registry import SessionRegistry
@@ -41,6 +42,17 @@ class SessionWitnessTests(unittest.TestCase):
         self.assertEqual(self.process, recovered.snapshot())
         self.assertEqual(1, self.api.opens)
         self.assertEqual(['session','attempt','resolved'], [event['kind'] for event in self.registry.inspect()['events']])
+    def test_replacement_witness_is_denied_after_acquisition_and_restart(self):
+        self.witness.acquire()
+        other_api = FakeApi()
+        other_provider = RetainedProcessRegistry(other_api,lambda view:True)
+        reopened = SessionRegistry(Path(self.temp.name),identity(),b'k'*32,self.anchor)
+        replacement = SessionWitness(reopened,other_provider,self.process,'3'*32)
+        with self.assertRaises(FoundryError): replacement.acquire()
+        with self.assertRaises(FoundryError): replacement.recover()
+        self.assertEqual(0,other_api.opens)
+        self.assertEqual(self.process,self.witness.recover().snapshot())
+        self.assertEqual(1,self.api.opens)
     def test_lost_acquisition_reply_recovers_same_provider_handle(self):
         original = self.provider.acquire
         def lost(*args):
@@ -48,6 +60,8 @@ class SessionWitnessTests(unittest.TestCase):
             raise OSError('lost caller reply')
         with mock.patch.object(self.provider, 'acquire', side_effect=lost):
             with self.assertRaises(OSError): self.witness.acquire()
+        replacement = SessionWitness(self.registry,RetainedProcessRegistry(FakeApi(),lambda view:True),self.process,'3'*32)
+        with self.assertRaises(FoundryError): replacement.acquire()
         with self.assertRaises(FoundryError): self.registry.begin('3'*32, 'exit', 'c'*64)
         self.assertEqual(self.process, self.witness.recover().snapshot())
         self.assertEqual(1, self.api.opens)
@@ -72,6 +86,32 @@ class SessionWitnessTests(unittest.TestCase):
         self.assertEqual(self.process, self.witness.recover().snapshot())
         self.assertEqual(3, self.anchor.cas_calls)
         self.assertEqual(1, self.api.opens)
+        replacement = SessionWitness(self.registry,RetainedProcessRegistry(FakeApi(),lambda view:True),self.process,'3'*32)
+        with self.assertRaises(FoundryError): replacement.acquire()
+
+    def test_older_multi_acquisition_history_remains_readable(self):
+        self.witness.acquire()
+        # Construct a valid legacy chain directly: new acquire attempts are
+        # refused, but historic authenticated records remain inspectable.
+        def legacy_append(event):
+            with self.registry._hold_lock():
+                records,previous = self.registry._verify()
+                self.registry._apply(records,event)
+                body = {'schema':1,'scope':self.registry._scope,'index':len(records),
+                        'previous':previous,'event':event}
+                record = dict(body,mac=self.registry._mac(body))
+                new_json(self.registry._directory/('record-%06d.json' % len(records)),record)
+                self.assertTrue(self.anchor.compare_and_swap(self.registry._scope,previous,digest(record)))
+        legacy_append({'kind':'attempt','request_id':'3'*32,'operation':'acquire','intent_sha256':'b'*64})
+        legacy_append({'kind':'resolved','request_id':'3'*32,'intent_sha256':'b'*64,
+                       'receipt_sha256':'c'*64,'outcome':'acknowledged'})
+        reopened = SessionRegistry(Path(self.temp.name),identity(),b'k'*32,self.anchor)
+        self.assertEqual(5,len(reopened.inspect()['events']))
+        self.assertEqual(self.process,self.witness.recover().snapshot())
+        other_api = FakeApi()
+        other = SessionWitness(reopened,RetainedProcessRegistry(other_api,lambda view:True),self.process,'4'*32)
+        with self.assertRaises(FoundryError): other.acquire()
+        self.assertEqual(0,other_api.opens)
     def test_reentrant_provider_access_is_refused_during_resolution(self):
         original = self.anchor.compare_and_swap
         def attempt_reentry(*args):

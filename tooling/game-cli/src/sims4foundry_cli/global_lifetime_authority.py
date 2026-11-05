@@ -6,6 +6,7 @@ same-user deletion, rollback, path races or Windows power-loss loss.
 """
 import ctypes
 from ctypes import wintypes
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import uuid
@@ -44,6 +45,19 @@ def _root():
     if not root.is_absolute():
         raise FoundryError('global_authority_unavailable', 'The OS authority location must be absolute.')
     return root
+
+
+@contextmanager
+def _publication_scope(code):
+    """Preserve uncertainty if a lock or guard fails after publication entry."""
+    entered = [False]
+    try:
+        yield entered
+    except Exception as error:
+        if entered[0] and not (isinstance(error,FoundryError) and error.details.get('no_replay') is True):
+            raise FoundryError(code, 'Original publication or cleanup may have completed; inspect without retry.',
+                               no_replay=True) from None
+        raise
 
 
 def initialize():
@@ -156,7 +170,7 @@ class BoundClaim:
     """In-memory correlation to the exact owner objects; not restart recovery."""
     def __init__(self, registry, journal, witness, reservation):
         self._registry, self._journal, self._witness = registry, journal, witness
-        self._reservation, self._attachment_attempted = reservation, False
+        self._reservation, self._acquisition_attempted, self._lease = reservation, False, None
 
     def __reduce_ex__(self, protocol):
         raise TypeError('A bound claim cannot be serialized or transferred.')
@@ -172,7 +186,7 @@ def claim_bound(registry, journal, witness):
         raise FoundryError('global_witness_binding', 'Original registry, journal and witness are required.')
     target = input_journal._target(journal.session['target'])
     identity = {key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
-    with witness.guard_for_claim(registry):
+    with _publication_scope('global_claim_unresolved') as publication, witness.guard_for_claim(registry):
         with lock(journal.root/'operation.lock'), registry._hold_events() as state:
             journal._verify()
             binding = registered_input.journal_binding(journal)
@@ -183,66 +197,71 @@ def claim_bound(registry, journal, witness):
                     or canonical(events[0].get('lifetime')) != canonical(session_registry._lifetime(target))
                     or journal._runs()):
                 raise FoundryError('global_session_unresolved', 'An unused matching owner and session are required.')
+            publication[0] = True
+            witness._global_state = 'pending'
+            registry._append_locked({'kind':'attempt','request_id':witness._request,
+                                     'operation':'acquire','intent_sha256':witness._intent})
             reservation = claim(target,journal.session['session_id'],witness._request,binding)
             return BoundClaim(registry,journal,witness,reservation)
 
 
-def attach_witness(registry, journal, witness, claim_ticket):
-    """Bind an already-held original witness to its existing reservation.
+def acquire_bound(claim_ticket):
+    """Acquire and attach the exact reserved witness once, without input.
 
-    No process is opened and no input is sent. The guard samples the retained
-    provider; registry, journal and reservation are not an atomic snapshot.
+    The registry acquisition stays pending until attachment is published.
+    Unknown acquisition or publication outcomes are never retried here.
     """
     from . import registered_input
     from .session_registry import SessionRegistry
     from .session_witness import SessionWitness
+    if type(claim_ticket) is not BoundClaim or claim_ticket._acquisition_attempted:
+        raise FoundryError('global_witness_binding', 'An unused original claim ticket is required.')
+    registry,journal,witness = claim_ticket._registry,claim_ticket._journal,claim_ticket._witness
     if (type(registry) is not SessionRegistry or type(journal) is not input_journal.InputJournal
-            or type(witness) is not SessionWitness or witness._registry is not registry
-            or type(claim_ticket) is not BoundClaim or claim_ticket._registry is not registry
-            or claim_ticket._journal is not journal or claim_ticket._witness is not witness
-            or claim_ticket._attachment_attempted):
+            or type(witness) is not SessionWitness or witness._registry is not registry):
         raise FoundryError('global_witness_binding', 'Original registry, journal and witness are required.')
     target = input_journal._target(journal.session['target'])
     identity = {key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
     if canonical(witness._identity) != canonical(identity):
         raise FoundryError('global_witness_binding', 'Witness lifetime differs from the reserved target.')
-    with witness.guard_for_dispatch(registry) as check_live:
+    with _publication_scope('global_witness_unresolved') as publication, witness._exclusive():
         with lock(journal.root/'operation.lock'), registry._hold_events() as state:
             journal._verify()
             binding = registered_input.journal_binding(journal)
             events = state['events']
-            if (len(events) != 3 or events[0].get('session_id') != journal.session['session_id']
+            if (len(events) != 2 or events[0].get('session_id') != journal.session['session_id']
                     or events[0].get('journal_sha256') != binding
                     or canonical(events[0].get('lifetime')) != canonical(session_registry._lifetime(target))
                     or events[1].get('kind') != 'attempt'
                     or events[1].get('operation') != 'acquire' or events[1].get('request_id') != witness._request
-                    or events[1].get('intent_sha256') != witness._intent or events[-1].get('kind') != 'resolved'
-                    or events[-1].get('request_id') != witness._request
-                    or events[-1].get('intent_sha256') != witness._intent
-                    or events[-1].get('outcome') != 'acknowledged'):
-                raise FoundryError('global_witness_binding', 'Original witness acquisition is not the latest resolved event.')
+                    or events[1].get('intent_sha256') != witness._intent):
+                raise FoundryError('global_witness_binding', 'Original witness acquisition is not the pending attempt.')
             reservation = inspect(target)
             if (reservation['session_id'] != journal.session['session_id']
                     or reservation['witness_id'] != witness._request or reservation['journal_sha256'] != binding
                     or reservation['reservation_sha256'] != claim_ticket._reservation['reservation_sha256']):
                 raise FoundryError('global_witness_binding', 'Original reservation differs from this witness and journal.')
-            root,authority_id = _authority()
-            row = {'schema':1,'authority_id':authority_id,'scope':reservation['scope'],
-                   'reservation_sha256':reservation['reservation_sha256'],'session_id':journal.session['session_id'],
-                   'witness_id':witness._request,'acquisition_intent_sha256':witness._intent,
-                   'registry_resolution_sha256':digest(events[-1])}
-            check_live()
-            claim_ticket._attachment_attempted = True
-            try:
+            claim_ticket._acquisition_attempted = True
+            publication[0] = True
+            lease = witness._provider.acquire(witness._request,identity)
+            claim_ticket._lease = lease
+            with witness._provider.guard_held(witness._request,identity) as (status,check_live):
+                witness._check_status(status)
+                check_live()
+                resolution = {'kind':'resolved','request_id':witness._request,'intent_sha256':witness._intent,
+                              'receipt_sha256':digest(status),'outcome':'acknowledged'}
+                root,authority_id = _authority()
+                row = {'schema':1,'authority_id':authority_id,'scope':reservation['scope'],
+                       'reservation_sha256':reservation['reservation_sha256'],'session_id':journal.session['session_id'],
+                       'witness_id':witness._request,'acquisition_intent_sha256':witness._intent,
+                       'registry_resolution_sha256':digest(resolution)}
                 new_json(root/'lifetimes'/(reservation['scope']+'.attached.json'),row)
-            except FileExistsError:
-                raise FoundryError('global_witness_unresolved', 'Original attachment exists; inspect without repeating.',
-                                   no_replay=True) from None
-            except Exception:
-                raise FoundryError('global_witness_unresolved', 'Witness attachment may have completed; inspect without retry.',
-                                   no_replay=True) from None
-    return {'outcome':'global_witness_attached','scope':reservation['scope'],'attachment_sha256':digest(row),
-            'same_user_authenticated':False,'atomic_snapshot':False,'game_qualified':False}
+                registry._append_locked(resolution)
+    # Do not authorize dispatch if a lock/guard cleanup acknowledgement was
+    # lost after publication; the original witness stays pending in that case.
+    witness._global_state = 'attached'
+    return lease,{'outcome':'global_witness_attached','scope':reservation['scope'],'attachment_sha256':digest(row),
+                  'same_user_authenticated':False,'atomic_snapshot':False,'game_qualified':False}
 
 
 def inspect_attachment(target):

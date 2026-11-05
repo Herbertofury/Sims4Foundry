@@ -52,6 +52,10 @@ owner's existing witness. A lost raw handle remains pending. An already
 anchored acquisition can be checked without a second open or resolution. This
 binds provider assertions; it does not add client authentication,
 loaded-image proof, restart recovery, slot retirement or atomic UI dispatch.
+New acquisition attempts are refused after the first acquisition attempt in a
+registry, including after a confirmed release or controller restart. Existing
+authenticated histories with multiple older acquisitions remain readable.
+This rule does not fence other registry authorities or prove unknown history.
 The held witness is guarded while its acquisition resolution is anchored; an
 old receipt or `reconciled_existing` response does not prove the current gate
 is free. Each new action must still pass the current registry pending check.

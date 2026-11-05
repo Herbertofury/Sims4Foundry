@@ -1,6 +1,6 @@
 """Cross-workspace reservation tests with an owned synthetic OS location."""
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from copy import deepcopy
 import io
 import json
@@ -141,7 +141,6 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
         witness = SessionWitness(registry,provider,process,'2'*32)
         ticket = authority.claim_bound(registry,journal,witness)
-        lease = witness.acquire()
         publish = authority.new_json
         def try_input(path,row):
             with self.assertRaises(FoundryError) as error:
@@ -149,13 +148,14 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
             self.assertEqual('busy',error.exception.code)
             return publish(path,row)
         with mock.patch.object(authority,'new_json',side_effect=try_input):
-            result = authority.attach_witness(registry,journal,witness,ticket)
+            lease,result = authority.acquire_bound(ticket)
         self.assertEqual('global_witness_attached',result['outcome'])
         self.assertFalse(result['atomic_snapshot'])
         self.assertFalse(result['game_qualified'])
-        with self.assertRaises(FoundryError): authority.attach_witness(registry,journal,witness,ticket)
+        with witness.guard_for_dispatch(registry) as check_live: check_live()
+        with self.assertRaises(FoundryError): authority.acquire_bound(ticket)
         lease.close()
-        with self.assertRaises(FoundryError): authority.attach_witness(registry,journal,witness,ticket)
+        with self.assertRaises(FoundryError): authority.acquire_bound(ticket)
         observed = authority.inspect_attachment(identity())
         self.assertEqual(result['attachment_sha256'],observed['attachment_sha256'])
         self.assertFalse(observed['current_witness_verified'])
@@ -185,7 +185,7 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         with mock.patch.object(authority,'new_json',side_effect=reenter):
             ticket = authority.claim_bound(registry,journal,witness)
         self.assertIs(ticket._witness,witness)
-        self.assertEqual(1,len(registry.inspect()['events']))
+        self.assertEqual(2,len(registry.inspect()['events']))
 
     def test_claim_fences_different_witness_on_same_registry(self):
         journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
@@ -202,7 +202,116 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
             return publish(path,row)
         with mock.patch.object(authority,'new_json',side_effect=attempt_other):
             authority.claim_bound(registry,journal,witness)
-        self.assertEqual(1,len(registry.inspect()['events']))
+        self.assertEqual(2,len(registry.inspect()['events']))
+
+    def test_failed_global_publication_keeps_acquisition_attempt_pending(self):
+        journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
+        (self.root/'registry').mkdir()
+        registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
+        registry.open_session('1'*32,registered_input.journal_binding(journal))
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        witness = SessionWitness(registry,RetainedProcessRegistry(FakeWitnessApi(),lambda view:True),process,'2'*32)
+        other = SessionWitness(registry,RetainedProcessRegistry(FakeWitnessApi(),lambda view:True),process,'3'*32)
+        with mock.patch.object(authority,'claim',side_effect=OSError('fixture lost publication')):
+            with self.assertRaises(FoundryError) as error: authority.claim_bound(registry,journal,witness)
+        self.assertTrue(error.exception.details['no_replay'])
+        self.assertEqual('attempt',registry.inspect()['events'][-1]['kind'])
+        with self.assertRaises(FoundryError): other.acquire()
+
+    def test_lost_claim_lock_cleanup_retains_pending_acquisition(self):
+        journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
+        (self.root/'registry').mkdir()
+        registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
+        registry.open_session('1'*32,registered_input.journal_binding(journal))
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        witness = SessionWitness(registry,RetainedProcessRegistry(FakeWitnessApi(),lambda view:True),process,'2'*32)
+        held = registry._hold_events
+        @contextmanager
+        def lose_cleanup():
+            with held() as state: yield state
+            raise OSError('lost fixture lock cleanup')
+        with mock.patch.object(registry,'_hold_events',side_effect=lose_cleanup):
+            with self.assertRaises(FoundryError) as error: authority.claim_bound(registry,journal,witness)
+        self.assertEqual('global_claim_unresolved',error.exception.code)
+        self.assertTrue(error.exception.details['no_replay'])
+        self.assertEqual('attempt',registry.inspect()['events'][-1]['kind'])
+        self.assertEqual('global_reservation_observed',authority.inspect(identity())['outcome'])
+        with self.assertRaises(FoundryError): witness.acquire()
+
+    def test_lost_acquisition_reply_cannot_advance_global_attachment(self):
+        journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
+        (self.root/'registry').mkdir()
+        registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
+        registry.open_session('1'*32,registered_input.journal_binding(journal))
+        api = FakeWitnessApi()
+        provider = RetainedProcessRegistry(api,lambda view:True)
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        witness = SessionWitness(registry,provider,process,'2'*32)
+        ticket = authority.claim_bound(registry,journal,witness)
+        acquire = provider.acquire
+        def lose_reply(*args):
+            acquire(*args)
+            raise OSError('lost fixture acquisition reply')
+        with mock.patch.object(provider,'acquire',side_effect=lose_reply):
+            with self.assertRaises(FoundryError) as error: authority.acquire_bound(ticket)
+        self.assertTrue(error.exception.details['no_replay'])
+        self.assertEqual('attempt',registry.inspect()['events'][-1]['kind'])
+        with self.assertRaises(FoundryError): witness.recover()
+        with self.assertRaises(FoundryError): authority.acquire_bound(ticket)
+        self.assertEqual(1,api.opens)
+
+    def test_lost_global_resolution_reply_keeps_owner_fenced(self):
+        journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
+        (self.root/'registry').mkdir()
+        anchor = FakeAnchor()
+        registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,anchor)
+        registry.open_session('1'*32,registered_input.journal_binding(journal))
+        api = FakeWitnessApi()
+        provider = RetainedProcessRegistry(api,lambda view:True)
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        witness = SessionWitness(registry,provider,process,'2'*32)
+        ticket = authority.claim_bound(registry,journal,witness)
+        publish = authority.new_json
+        def lose_resolution(path,row):
+            publish(path,row)
+            anchor.fail = 'after'
+        with mock.patch.object(authority,'new_json',side_effect=lose_resolution):
+            with self.assertRaises(FoundryError) as error: authority.acquire_bound(ticket)
+        self.assertTrue(error.exception.details['no_replay'])
+        anchor.fail = None
+        self.assertEqual('resolved',registry.inspect()['events'][-1]['kind'])
+        self.assertEqual('global_attachment_observed',authority.inspect_attachment(identity())['outcome'])
+        with self.assertRaises(FoundryError): witness.recover()
+        with self.assertRaises(FoundryError):
+            with witness.guard_for_dispatch(registry): pass
+        other = SessionWitness(registry,RetainedProcessRegistry(FakeWitnessApi(),lambda view:True),process,'3'*32)
+        with self.assertRaises(FoundryError): other.acquire()
+        ticket._lease.close()
+
+    def test_lost_attachment_lock_cleanup_does_not_authorize_dispatch(self):
+        journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
+        (self.root/'registry').mkdir()
+        registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
+        registry.open_session('1'*32,registered_input.journal_binding(journal))
+        provider = RetainedProcessRegistry(FakeWitnessApi(),lambda view:True)
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        witness = SessionWitness(registry,provider,process,'2'*32)
+        ticket = authority.claim_bound(registry,journal,witness)
+        held = registry._hold_events
+        @contextmanager
+        def lose_cleanup():
+            with held() as state:
+                yield state
+            raise OSError('lost fixture lock cleanup')
+        with mock.patch.object(registry,'_hold_events',side_effect=lose_cleanup):
+            with self.assertRaises(FoundryError) as error: authority.acquire_bound(ticket)
+        self.assertEqual('global_witness_unresolved',error.exception.code)
+        self.assertTrue(error.exception.details['no_replay'])
+        self.assertEqual('global_attachment_observed',authority.inspect_attachment(identity())['outcome'])
+        with self.assertRaises(FoundryError):
+            with witness.guard_for_dispatch(registry): pass
+        with self.assertRaises(FoundryError): authority.acquire_bound(ticket)
+        ticket._lease.close()
 
     def test_wrong_witness_cannot_attach_to_reserved_session(self):
         journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
@@ -213,11 +322,10 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
         witness = SessionWitness(registry,provider,process,'2'*32)
         ticket = authority.claim_bound(registry,journal,witness)
-        witness.acquire()
         other_provider = RetainedProcessRegistry(FakeWitnessApi(),lambda view:True)
         other = SessionWitness(registry,other_provider,process,'2'*32)
-        other_provider.acquire('2'*32,process)
-        with self.assertRaises(FoundryError): authority.attach_witness(registry,journal,other,ticket)
+        with self.assertRaises(FoundryError): other.acquire()
+        self.assertFalse(ticket._acquisition_attempted)
         self.assertEqual(1,len(list((self.root/'Sims4Foundry'/'live-authority-v1'/'lifetimes').iterdir())))
 
     def test_lost_attachment_reply_inspects_original_without_repeat(self):
@@ -229,18 +337,17 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
         witness = SessionWitness(registry,provider,process,'2'*32)
         ticket = authority.claim_bound(registry,journal,witness)
-        lease = witness.acquire()
         publish = authority.new_json
         def lose_reply(path, row):
             publish(path,row)
             raise OSError('lost fixture reply')
         with mock.patch.object(authority,'new_json',side_effect=lose_reply):
-            with self.assertRaises(FoundryError) as error: authority.attach_witness(registry,journal,witness,ticket)
+            with self.assertRaises(FoundryError) as error: authority.acquire_bound(ticket)
         self.assertEqual('global_witness_unresolved',error.exception.code)
         self.assertTrue(error.exception.details['no_replay'])
         self.assertEqual('global_attachment_observed',authority.inspect_attachment(identity())['outcome'])
-        with self.assertRaises(FoundryError): authority.attach_witness(registry,journal,witness,ticket)
-        lease.close()
+        with self.assertRaises(FoundryError): authority.acquire_bound(ticket)
+        ticket._lease.close()
 
     def test_tampered_reservation_is_refused_without_replacement(self):
         result = self.claim()

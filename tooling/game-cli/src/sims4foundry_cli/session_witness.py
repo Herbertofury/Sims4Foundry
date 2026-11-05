@@ -22,6 +22,7 @@ class SessionWitness:
             raise FoundryError('witness_binding', 'Use the original registry and retained witness owner.')
         self._registry, self._provider = registry, provider
         self._owner, self._busy = threading.current_thread(), False
+        self._global_state = 'none'
         self._identity = _identity(identity)
         self._request = request_id
         state = registry.inspect()
@@ -93,6 +94,8 @@ class SessionWitness:
         if registry is not self._registry:
             raise FoundryError('witness_binding', 'Dispatch must use the original registry authority.')
         with self._exclusive():
+            if self._global_state == 'pending':
+                raise FoundryError('witness_unresolved', 'Original global attachment is pending; do not dispatch.')
             with self._provider.guard_held(self._request, self._identity) as (status, check_live):
                 self._resolution(status, allow_pending=False)
                 check_live()
@@ -100,6 +103,8 @@ class SessionWitness:
 
     def acquire(self):
         with self._exclusive():
+            if self._global_state == 'pending':
+                raise FoundryError('witness_unresolved', 'Global acquisition is already reserved; do not reacquire.')
             self._registry.begin(self._request, 'acquire', self._intent)
             lease = self._provider.acquire(self._request, deepcopy(self._identity))
             self._complete()
@@ -108,6 +113,8 @@ class SessionWitness:
     def recover(self):
         """Reconcile only the same owner's existing handle; never open a PID."""
         with self._exclusive():
+            if self._global_state == 'pending':
+                raise FoundryError('witness_unresolved', 'Global attachment is unresolved; do not advance its registry.')
             lease = self._provider.recover(self._request, deepcopy(self._identity))
             self._complete()
             return lease

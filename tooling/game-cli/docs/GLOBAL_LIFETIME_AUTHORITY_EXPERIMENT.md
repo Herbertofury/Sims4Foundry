@@ -25,16 +25,22 @@ reopens an existing unused session and binds its original journal and registry.
 `claim_bound` instead returns a non-serializable in-process ticket tied to the
 exact registry, journal and witness objects before witness acquisition.
 The witness's original owner thread excludes reentrant acquisition and recovery
-while that in-process claim is being published. This is not authentication
-against arbitrary same-user or in-process Python.
-The claim and attachment also hold the original journal lock and cooperating
-registry lock across their checks and publication; another witness using that
-same registry cannot begin an attempt during those steps. Other authorities,
-non-cooperating writers and path replacement are not excluded.
-`attach_witness` requires that original ticket and can subsequently publish an
-attachment to the matching held witness and its resolved acquisition. It samples the original provider guard
-but does not open a process. An existing attachment can be inspected after a
-lost reply; this does not prove the witness is still held or the gate is free.
+while that in-process claim is being published. The claim records the witness
+acquisition attempt in its registry before publishing the global reservation.
+`acquire_bound` makes one provider acquisition, checks the original retained
+handle, publishes the attachment, and then resolves that same registry attempt
+while holding the original journal and registry locks. A failure can leave an
+unresolved attempt or attachment; do not retry the acquisition. A registry now
+refuses replacement acquisition after any original acquisition attempt, while
+remaining able to read older histories with multiple acquisitions. Recovery of
+non-global witnesses uses the original in-memory provider; uncertain global
+attachment remains fenced.
+
+This is not authentication against arbitrary same-user or in-process Python.
+The journal and cooperating registry locks exclude another witness using that
+same registry during claim and attachment. Other authorities, non-cooperating
+writers and path replacement are not excluded. An existing attachment can be
+inspected after a lost reply; this does not prove the witness is still held or the gate is free.
 The registry, journal and global reservation are not an atomic snapshot.
 Neither the attachment nor the claim reconciles unknown prior authorities.
 

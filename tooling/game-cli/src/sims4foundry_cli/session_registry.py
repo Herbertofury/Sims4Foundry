@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import hashlib
 import hmac
 import re
+import threading
 
 from .errors import FoundryError
 from .io import canonical, digest, external_path, lock, new_json
@@ -64,6 +65,17 @@ class SessionRegistry:
         self._scope = digest(self._lifetime)
         self._key, self._anchor = key, anchor
         self._directory = self._root / self._scope
+        self._lock_owner = None
+
+    @contextmanager
+    def _hold_lock(self):
+        with lock(self._root / ('scope-' + self._scope + '.lock')):
+            _require(self._lock_owner is None, 'registry_pending', 'Registry lock is already held.')
+            self._lock_owner = threading.current_thread()
+            try:
+                yield
+            finally:
+                self._lock_owner = None
 
     def _mac(self, content):
         return hmac.new(self._key, canonical(content), hashlib.sha256).hexdigest()
@@ -136,22 +148,31 @@ class SessionRegistry:
         return records, head
 
     def _append(self, event):
-        with lock(self._root / ('scope-' + self._scope + '.lock')):
-            records, previous = self._verify()
-            _require(len(records) < MAX_RECORDS, 'registry_full', 'Registry record limit reached.')
-            self._apply(records, event)
-            self._directory.mkdir(exist_ok=True)
-            body = {'schema':1, 'scope':self._scope, 'index':len(records), 'previous':previous, 'event':deepcopy(event)}
-            record = dict(body, mac=self._mac(body))
-            head = digest(record)
-            new_json(self._directory / ('record-%06d.json' % len(records)), record)
-            try:
-                advanced = self._anchor.compare_and_swap(self._scope, None if not records else previous, head)
-            except Exception:
-                raise FoundryError('registry_unresolved', 'Anchor update acknowledgement was lost; do not replay.') from None
-            _require(advanced is True, 'registry_unresolved', 'Anchor did not confirm the original update; do not replay.')
-            _require(self._read_anchor() == head, 'registry_unresolved', 'Anchor did not retain the original update.')
-            return {'scope':self._scope, 'head':head, 'index':len(records), 'event':deepcopy(event)}
+        with self._hold_lock():
+            return self._append_locked(event)
+
+    def _append_locked(self, event):
+        """Append only while the caller already owns this registry's lock."""
+        _require(self._lock_owner is threading.current_thread(), 'registry_pending', 'Original registry lock is required.')
+        records, previous = self._verify()
+        _require(len(records) < MAX_RECORDS, 'registry_full', 'Registry record limit reached.')
+        if type(event) is dict and event.get('kind') == 'attempt' and event.get('operation') == 'acquire':
+            _require(not any(record['event'].get('kind') == 'attempt'
+                             and record['event'].get('operation') == 'acquire' for record in records),
+                     'registry_pending', 'Original witness acquisition already exists; never acquire a replacement.')
+        self._apply(records, event)
+        self._directory.mkdir(exist_ok=True)
+        body = {'schema':1, 'scope':self._scope, 'index':len(records), 'previous':previous, 'event':deepcopy(event)}
+        record = dict(body, mac=self._mac(body))
+        head = digest(record)
+        new_json(self._directory / ('record-%06d.json' % len(records)), record)
+        try:
+            advanced = self._anchor.compare_and_swap(self._scope, None if not records else previous, head)
+        except Exception:
+            raise FoundryError('registry_unresolved', 'Anchor update acknowledgement was lost; do not replay.') from None
+        _require(advanced is True, 'registry_unresolved', 'Anchor did not confirm the original update; do not replay.')
+        _require(self._read_anchor() == head, 'registry_unresolved', 'Anchor did not retain the original update.')
+        return {'scope':self._scope, 'head':head, 'index':len(records), 'event':deepcopy(event)}
 
     def open_session(self, session_id, journal_sha256):
         _require(_token(session_id) and _hash(journal_sha256), 'registry_session', 'Exact session and journal binding are required.')
@@ -170,7 +191,7 @@ class SessionRegistry:
                              'receipt_sha256':receipt_sha256,'outcome':outcome})
 
     def inspect(self):
-        with lock(self._root / ('scope-' + self._scope + '.lock')):
+        with self._hold_lock():
             records, head = self._verify()
             return {'scope':self._scope, 'head':head if records else None,
                     'events':[deepcopy(item['event']) for item in records]}
@@ -178,7 +199,7 @@ class SessionRegistry:
     @contextmanager
     def _hold_events(self):
         """Keep the cooperating registry lock held during a bounded host step."""
-        with lock(self._root / ('scope-' + self._scope + '.lock')):
+        with self._hold_lock():
             records,head = self._verify()
             yield {'scope':self._scope,'head':head if records else None,
                    'events':[deepcopy(item['event']) for item in records]}

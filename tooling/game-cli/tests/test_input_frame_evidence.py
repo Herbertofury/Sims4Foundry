@@ -137,8 +137,10 @@ class InputFrameEvidenceTests(unittest.TestCase):
     def test_recovery_refuses_a_different_held_witness_for_the_same_lifetime(self):
         second_provider = RetainedProcessRegistry(FakeWitnessApi(),lambda view:True)
         process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
-        second_witness = SessionWitness(self.registry,second_provider,process,'5'*32)
-        second_witness.acquire()
+        second_witness = SessionWitness(self.registry,second_provider,process,'4'*32)
+        # Fabricate a second provider with the same status without creating a
+        # second registry acquisition; normal replacement acquisition is denied.
+        second_provider.acquire('4'*32,process)
         with self.backend() as backend:
             original = self.history.execute_once
             def lose_reply(*args, **kwargs):
