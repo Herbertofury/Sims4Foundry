@@ -8,6 +8,7 @@ UI transition, game state, save, or capture time. There is no restart recovery.
 import threading
 import re
 import os
+import secrets
 
 from . import input_frame_evidence, input_journal, registered_input
 from .errors import FoundryError
@@ -45,6 +46,8 @@ class LiveOwner:
         self._busy = False
         self._attempted = set()
         self._completion_attempted = set()
+        self._completion_records = {}
+        self._pending_completion = None
         self._backend, self._backend_open, self._close_attempted = None, False, False
 
     def _owner(self):
@@ -87,6 +90,10 @@ class LiveOwner:
 
     def _dispatch_once(self, request_id, packets, expected_observation, evidence_directory):
         self._owner()
+        if (self._pending_completion is not None
+                and self._completion_records[self._pending_completion]['state'] != 'confirmed'):
+            raise FoundryError('live_owner_completion_pending',
+                               'Inspect and confirm the original fixture completion before another input.')
         if self._backend is not None:
             raise FoundryError('live_owner_unresolved', 'Original sender is retained; inspect it without reopening.')
         if not input_journal._token(request_id):
@@ -187,13 +194,15 @@ class LiveOwner:
                 registered_input.reconcile_acknowledged(self._registry,self._journal,request_id)
                 check_live()
                 self._close_sender()
-            # Keep the old sender as the fence until cleanup flags are reset.
-            # An interruption between assignments must not admit a new sender.
+            # Install the separate confirmation fence before releasing the old
+            # sender reference. A lost completion reply cannot admit new input.
+            ticket = secrets.token_hex(16)
+            self._completion_records[request_id] = {'request_id':request_id,
+                                                     'completion_token':ticket, 'state':'ready'}
+            self._pending_completion = request_id
             self._close_attempted = False
             self._backend = None
-            return {'outcome':'fixture_step_completed', 'request_id':request_id,
-                    'observer_authenticated':False, 'semantic_state_verified':False,
-                    'game_qualified':False, 'os_release_verified':False}
+            return self._fixture_completion_snapshot(request_id)
         except Exception as error:
             code = error.code if isinstance(error,FoundryError) else None
             code = code if type(code) is str and re.fullmatch(r'[a-z0-9_]{1,64}',code) else 'other'
@@ -202,6 +211,32 @@ class LiveOwner:
                                no_replay=True, original_error_code=code) from None
         finally:
             self._busy = False
+
+    def fixture_completion_snapshot(self, request_id):
+        """Inspect the original in-memory fixture completion, without input or cleanup."""
+        self._owner()
+        return self._fixture_completion_snapshot(request_id)
+
+    def _fixture_completion_snapshot(self, request_id):
+        if not input_journal._token(request_id) or request_id not in self._completion_records:
+            raise FoundryError('live_owner_completion_unavailable', 'No original fixture completion is available.')
+        row = self._completion_records[request_id]
+        return {'outcome':'fixture_step_completed', 'request_id':request_id,
+                'completion_token':row['completion_token'], 'completion_state':row['state'],
+                'observer_authenticated':False, 'semantic_state_verified':False,
+                'game_qualified':False, 'os_release_verified':False}
+
+    def fixture_confirm_completion(self, request_id, completion_token):
+        """Confirm the exact original fixture completion; never input or clean up."""
+        self._owner()
+        if (request_id != self._pending_completion or not input_journal._token(request_id)
+                or not input_journal._token(completion_token)
+                or request_id not in self._completion_records
+                or not secrets.compare_digest(self._completion_records[request_id]['completion_token'], completion_token)):
+            raise FoundryError('live_owner_completion_unavailable', 'The original fixture completion token is required.')
+        # This is only an in-memory fixture gate, not authenticated operator consent.
+        self._completion_records[request_id]['state'] = 'confirmed'
+        return self.fixture_completion_snapshot(request_id)
 
     def close_sender(self):
         """One cleanup attempt for the original sender; never close the witness."""

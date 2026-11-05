@@ -91,9 +91,47 @@ class IndependentLiveOwnerTests(unittest.TestCase):
         self.assertFalse(completed['game_qualified'])
         self.assertEqual(1, len(seen))
         self.assertEqual('acknowledged_by_host', self.journal.status('2'*32)['state'])
+        with self.assertRaises(FoundryError): self.click('3'*32,'second-evidence')
+        with self.assertRaises(FoundryError):
+            self.owner.fixture_confirm_completion('2'*32, '0'*32)
+        snapshot = self.owner.fixture_completion_snapshot('2'*32)
+        self.assertEqual('ready', snapshot['completion_state'])
+        confirmed = self.owner.fixture_confirm_completion('2'*32, snapshot['completion_token'])
+        self.assertEqual('confirmed', confirmed['completion_state'])
         self.assertEqual('frame_recorded', self.click('3'*32,'second-evidence')['outcome'])
         self.assertEqual(4, len(self.api.posts))
         self.assertEqual('awaiting_readback', self.journal.status('3'*32)['state'])
+
+    def test_lost_fixture_completion_reply_requires_inspect_and_confirm(self):
+        self.click()
+        def observer(view, target, expected):
+            return dict(view, evidence_sha256='b'*64, observation=expected)
+        pin = (mock.patch.object(registered_input, '_retain_record', side_effect=lambda *args:nullcontext())
+               if os.name != 'nt' else nullcontext())
+        with pin, mock.patch.object(self.owner, '_fixture_completion_snapshot', side_effect=OSError('lost reply')):
+            with self.assertRaises(FoundryError): self.owner.fixture_complete_step('2'*32, observer)
+        with self.assertRaises(FoundryError): self.click('3'*32,'second-evidence')
+        self.assertEqual(2, len(self.api.posts))
+        snapshot = self.owner.fixture_completion_snapshot('2'*32)
+        self.assertEqual('ready', snapshot['completion_state'])
+        self.owner.fixture_confirm_completion('2'*32, snapshot['completion_token'])
+        self.assertEqual('frame_recorded', self.click('3'*32,'second-evidence')['outcome'])
+        self.assertEqual(4, len(self.api.posts))
+
+    def test_lost_fixture_confirmation_reply_can_be_inspected_without_replay(self):
+        self.click()
+        def observer(view, target, expected):
+            return dict(view, evidence_sha256='b'*64, observation=expected)
+        pin = (mock.patch.object(registered_input, '_retain_record', side_effect=lambda *args:nullcontext())
+               if os.name != 'nt' else nullcontext())
+        with pin:
+            completed = self.owner.fixture_complete_step('2'*32, observer)
+        with mock.patch.object(self.owner, 'fixture_completion_snapshot', side_effect=OSError('lost reply')):
+            with self.assertRaises(OSError):
+                self.owner.fixture_confirm_completion('2'*32, completed['completion_token'])
+        self.assertEqual('confirmed', self.owner.fixture_completion_snapshot('2'*32)['completion_state'])
+        self.assertEqual(2, len(self.api.posts))
+        self.assertEqual('frame_recorded', self.click('3'*32,'second-evidence')['outcome'])
 
     def test_fixture_failed_observer_fences_completion_and_next_input(self):
         self.click()
@@ -117,6 +155,26 @@ class IndependentLiveOwnerTests(unittest.TestCase):
             with self.assertRaises(FoundryError):
                 self.owner.fixture_complete_step('2'*32, observer)
         self.assertEqual('acknowledged_by_host', self.journal.status('2'*32)['state'])
+        with self.assertRaises(FoundryError): self.click('3'*32,'second-evidence')
+        with self.assertRaises(FoundryError): self.owner.fixture_complete_step('2'*32, observer)
+        self.assertEqual(2, len(self.api.posts))
+
+    def test_fixture_lost_reply_after_resolution_keeps_sender_fenced(self):
+        self.click()
+        def observer(view, target, expected):
+            with self.assertRaises(FoundryError): self.click('3'*32,'reentrant')
+            with self.assertRaises(FoundryError): self.owner.close_sender()
+            return dict(view, evidence_sha256='b'*64, observation=expected)
+        reconcile = registered_input.reconcile_acknowledged
+        def resolve_then_lose(*args):
+            reconcile(*args)
+            raise OSError('lost resolution reply')
+        pin = (mock.patch.object(registered_input, '_retain_record', side_effect=lambda *args:nullcontext())
+               if os.name != 'nt' else nullcontext())
+        with pin, mock.patch.object(registered_input, 'reconcile_acknowledged', side_effect=resolve_then_lose):
+            with self.assertRaises(FoundryError):
+                self.owner.fixture_complete_step('2'*32, observer)
+        self.assertEqual('resolved', self.registry.inspect()['events'][-1]['kind'])
         with self.assertRaises(FoundryError): self.click('3'*32,'second-evidence')
         with self.assertRaises(FoundryError): self.owner.fixture_complete_step('2'*32, observer)
         self.assertEqual(2, len(self.api.posts))

@@ -133,8 +133,10 @@ contracts are met.
 
 `LiveOwner.fixture_complete_step` composes one fixture-provided synchronous
 observer, the original journal acknowledgement, registry reconciliation and
-one sender cleanup. Only after all of those return does the same owner allow a
-distinct next request. A failure fences the original sender and completion
+one sender cleanup. The original owner must then inspect the resulting in-memory
+completion and explicitly confirm its exact token before a distinct next request.
+A lost completion or confirmation reply can be inspected through that same owner;
+there is no restart recovery. A failure fences the original sender and completion
 attempt; it does not resend input or repeat acknowledgement or cleanup. The
 observer is injected test code, not an authenticated operator, independent
 visual observer or proof of game state. This method is not exposed through the
