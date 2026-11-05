@@ -59,3 +59,12 @@ the game. Do not repeat initialization after an uncertain result. The CLI
 does not expose reservation creation as a standalone action. This experiment
 is not connected to `experimental-live-owner`; live admission remains denied
 pending independent review and a complete shared authority lifecycle.
+
+`foundry-game global-authority inspect-prior --identity ORIGINAL_IDENTITY.json
+--sessions SESSION_LIST.json` inspects up to 64 explicitly supplied older
+authority/session pairs. The session list is a JSON array of objects with
+`authority` and `session` path fields. It reports pending registry attempts
+and nonterminal journal runs for the specified lifetime. It cannot discover
+unknown authorities, prove that the list is complete, verify game state or
+authorize live input. Cooperative lock files or SQLite sidecars may be created;
+observations across sessions are not one atomic snapshot.

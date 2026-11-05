@@ -282,3 +282,47 @@ def inspect_attachment(target):
     return {'outcome':'global_attachment_observed','scope':reservation['scope'],'attachment_sha256':digest(row),
             'current_witness_verified':False,'registry_gate_verified':False,
             'atomic_snapshot':False,'game_qualified':False}
+
+
+def inspect_prior_sessions(target, sessions):
+    """Inspect explicitly supplied older sessions; never claim completeness.
+
+    Existing cooperative lock files may be initialized, and SQLite may create
+    its usual sidecars. The per-session checks are not one atomic snapshot.
+    """
+    from . import independent_session, registered_input
+    if type(sessions) is not list or len(sessions) > 64:
+        raise FoundryError('global_history_arguments', 'Supply at most 64 explicit authority/session pairs.')
+    selected = input_journal._target(target)
+    lifetime = session_registry._lifetime(selected)
+    seen, rows = set(), []
+    for pair in sessions:
+        if (type(pair) is not dict or set(pair) != {'authority','session'}
+                or type(pair['authority']) is not str or type(pair['session']) is not str):
+            raise FoundryError('global_history_arguments', 'Each entry needs exact authority and session paths.')
+        root, session = external_path(pair['authority']),external_path(pair['session'])
+        key = (os.path.normcase(str(root)),os.path.normcase(str(session)))
+        if key in seen:
+            raise FoundryError('global_history_arguments', 'Duplicate session entries are not accepted.')
+        seen.add(key)
+        intent,registry,journal,_ = independent_session._open(root,session)
+        if canonical(session_registry._lifetime(intent['identity'])) != canonical(lifetime):
+            raise FoundryError('global_history_binding', 'A supplied prior session has a different process lifetime.')
+        with lock(journal.root/'operation.lock'), registry._hold_events() as current:
+            journal._verify()
+            binding = registered_input.journal_binding(journal)
+            events = current['events']
+            if (not events or events[0].get('session_id') != journal.session['session_id']
+                    or events[0].get('journal_sha256') != binding):
+                raise FoundryError('global_history_binding', 'Original session records changed during inspection.')
+            runs = [journal._status(request_id) for request_id in journal._runs()]
+            pending = bool(events[-1].get('kind') == 'attempt') or any(
+                row['state'] not in ('rejected','acknowledged_by_host') for row in runs)
+            rows.append({'session_id':journal.session['session_id'],'journal_sha256':binding,
+                         'registry_head':current['head'],'pending_observed':pending,
+                         'input_states':[{'request_id':row['request_id'],'state':row['state']} for row in runs]})
+    return {'outcome':'specified_sessions_observed','sessions':rows,
+            'pending_observed':any(row['pending_observed'] for row in rows),
+            'complete_history_verified':False,'atomic_snapshot':False,
+            'live_admission_authorized':False,'game_qualified':False,
+            'lock_or_sqlite_side_effects_possible':True}

@@ -132,6 +132,25 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         self.assertEqual('global_session_unresolved',error.exception.code)
         self.assertFalse(list((self.root/'Sims4Foundry'/'live-authority-v1'/'lifetimes').iterdir()))
 
+    def test_prior_session_inspection_never_claims_complete_history(self):
+        journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
+        (self.root/'registry').mkdir()
+        registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
+        registry.open_session('1'*32,registered_input.journal_binding(journal))
+        intent = {'session_id':'1'*32,'identity':identity()}
+        pairs = [{'authority':str(self.root/'old-authority'),'session':str(self.root/'old-session')}]
+        with mock.patch.object(independent_session,'_open',return_value=(intent,registry,journal,registry.inspect())):
+            result = authority.inspect_prior_sessions(identity(),pairs)
+            self.assertFalse(result['pending_observed'])
+            self.assertFalse(result['complete_history_verified'])
+            self.assertFalse(result['live_admission_authorized'])
+            registry.begin('2'*32,'input','b'*64)
+            result = authority.inspect_prior_sessions(identity(),pairs)
+            self.assertTrue(result['pending_observed'])
+            with self.assertRaises(FoundryError): authority.inspect_prior_sessions(identity(),pairs*2)
+            foreign = deepcopy(identity()); foreign['creation_filetime'] += 1
+            with self.assertRaises(FoundryError): authority.inspect_prior_sessions(foreign,pairs)
+
     def test_attach_requires_original_current_witness_and_registry(self):
         journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
         (self.root/'registry').mkdir()
