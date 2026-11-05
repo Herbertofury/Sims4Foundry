@@ -15,19 +15,27 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+import uuid
 from unittest import mock
 
 from sims4foundry_cli import (guarded_input, input_journal, live_input, native_input, process_exit,
                               registered_input, session_registry, windows, windows_registry_key, wgc_recorder)
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Point, encode_click
-from sims4foundry_cli.io import digest
+from sims4foundry_cli.io import digest, external_path, new_json
 from sims4foundry_cli.retained_process_witness import RetainedProcessRegistry
 from sims4foundry_cli.session_witness import SessionWitness
 from sims4foundry_cli.sqlite_anchor import SQLiteAnchor
 from sims4foundry_cli.visual_probe import _pixels
 
 _OWNED_UNRESOLVED = []
+
+
+def _fixture_parent(path):
+    parent = external_path(path).resolve(strict=True)
+    if not parent.is_dir():
+        raise FoundryError('fixture_parent', 'Use an existing external fixture directory.')
+    return parent
 
 
 def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
@@ -60,10 +68,13 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
         test.assertEqual((target['pid'],target['executable'],target['executable_sha256'],target['hwnd']),
                          (pid_value,str(path),digest_value,hwnd_value))
         return dict(deepcopy(target),observed_at=time.time())
-    base = Path(os.environ.get('FOUNDRY_REGISTERED_FIXTURE_ROOT',tempfile.gettempdir())).resolve(strict=True)
-    root = Path(tempfile.mkdtemp(prefix='foundry-owned-registered-',dir=str(base))).resolve()
-    test.assertEqual(base,root.parent)
+    base = _fixture_parent(os.environ.get('FOUNDRY_REGISTERED_FIXTURE_ROOT',tempfile.gettempdir()))
+    root = base / ('foundry-owned-registered-' + uuid.uuid4().hex)
     try:
+        root.mkdir(exist_ok=False)
+        test.assertEqual(base,root.resolve(strict=True).parent)
+        new_json(root/'fixture-manifest.json',{'schema':1,'kind':'owned_registered_fixture',
+                                               'directory_name':root.name,'game_accessed':False})
         with ExitStack() as stack:
             for module in (windows,input_journal,session_registry,guarded_input,wgc_recorder):
                 stack.enter_context(mock.patch.object(module,'validate_identity',side_effect=validate_owned))
@@ -112,6 +123,8 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                 closed = result.get('outcome') == 'provider_reported_closed'
                 test.assertTrue(closed)
                 _OWNED_UNRESOLVED.remove(retained)
+                new_json(root/'fixture-outcome.json',{'schema':1,'journal_state':'awaiting_readback',
+                         'request_id':'3'*32,'capture_time_verified':False,'game_qualified':False})
             finally:
                 # An uncertain witness close is never retried.
                 if not closed:
@@ -119,4 +132,4 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
     finally:
         # The action remains awaiting readback; keep its original evidence even
         # on success, and preserve partial evidence on any uncertain failure.
-        print('Owned fixture evidence retained at: ' + str(root),flush=True)
+        print('Owned fixture evidence directory name: ' + root.name,flush=True)

@@ -31,6 +31,11 @@ independent inspector only for the test's own PID, image and window; its key is
 DPAPI-protected and its SQLite anchor is cooperative. It leaves the journal
 awaiting readback and preserves the original fixture evidence directory; set
 `FOUNDRY_REGISTERED_FIXTURE_ROOT` to select its existing parent directory.
+The parent is checked for named game/profile paths and existing reparse points
+before directory creation, but this path-based check does not prevent a
+concurrent replacement. Fixture records include local process and path details;
+avoid publishing them. Its local manifest and outcome describe fixture scope,
+not independently verified game evidence.
 It does not qualify an unpatched Sims identity, game action, frame
 capture time or authenticated semantic observation.
 Recorder startup with an unknown child-creation outcome and unsuccessful
