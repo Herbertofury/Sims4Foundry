@@ -68,9 +68,32 @@ def inspect(journal, request_id, destination):
     if type(receipt) is not dict or digest(receipt) != digest(expected):
         raise FoundryError('frame_changed', 'Stored completion differs from the original frame intent.')
     return {'state':'matching_files_observed', 'files_observed':present,
+            'frame_sha256':intent['frame_sha256'], 'evidence_intent_sha256':digest(intent),
             'acknowledged':False, 'atomic_snapshot':False,
             'capture_time_verified':False, 'action_caused_verified':False,
             'semantic_state_verified':False, 'game_qualified':False}
+
+
+def compare(journal, request_id, destination, frame_sha256, evidence_intent_sha256,
+            reference, reference_sha256, region, *, max_channel_difference=0, max_mismatched_pixels=0):
+    """Compare pinned evidence pixels without inferring delivery or game state."""
+    from . import visual_probe
+    observed = inspect(journal, request_id, destination)
+    if (observed['state'] != 'matching_files_observed'
+            or observed['frame_sha256'] != frame_sha256
+            or observed['evidence_intent_sha256'] != evidence_intent_sha256):
+        raise FoundryError('frame_binding', 'The original evidence or caller-provided pins do not match.')
+    result = visual_probe.compare(external_path(destination)/'frame.png',frame_sha256,
+                                  reference,reference_sha256,region,
+                                  max_channel_difference=max_channel_difference,
+                                  max_mismatched_pixels=max_mismatched_pixels)
+    after = inspect(journal, request_id, destination)
+    if after != observed:
+        raise FoundryError('frame_changed', 'Evidence changed during comparison.')
+    result.update({'request_id':request_id, 'evidence_intent_sha256':evidence_intent_sha256,
+                   'acknowledged':False, 'atomic_snapshot':False, 'capture_time_verified':False,
+                   'action_caused_verified':False})
+    return result
 
 
 def capture(journal, request_id, backend, destination):

@@ -46,6 +46,11 @@ the original journal and evidence directory, reporting missing files or a
 matching set. It neither resolves the journal nor restores an incomplete
 sender binding; there is no CLI command or qualified recovery protocol yet.
 Its observations are not an atomic snapshot and do not authenticate files.
+`input_frame_evidence.compare` can compare a region against an explicitly
+hash-pinned reference, using caller-supplied frame and evidence-intent hashes.
+A matching region is a pixel observation, not an input acknowledgement,
+capture-time proof or evidence of game state or action causality. Rechecking
+the evidence before and after comparison does not produce an atomic snapshot.
 The capture's separate path-based hash and PNG reads do not exclude concurrent
 replacement either.
 The parent is checked for named game/profile paths and existing reparse points

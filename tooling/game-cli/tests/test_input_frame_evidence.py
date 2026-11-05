@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from sims4foundry_cli import input_frame_evidence, input_journal, live_input, registered_input
+from sims4foundry_cli import input_frame_evidence, input_journal, live_input, registered_input, visual_probe
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Point, encode_click
 from sims4foundry_cli.wgc_recorder import Frame
@@ -19,6 +19,7 @@ from sims4foundry_cli.session_witness import SessionWitness
 from sims4foundry_cli.retained_process_witness import RetainedProcessRegistry
 from test_session_registry import FakeAnchor
 from test_session_witness import FakeApi as FakeWitnessApi
+from test_visual_probe import rgba
 
 
 class PngRecorder(FakeRecorder):
@@ -168,6 +169,43 @@ class InputFrameEvidenceTests(unittest.TestCase):
             self.assertEqual('matching_files_observed',result['state'])
             self.assertEqual(posts,self.api.posts)
             self.assertEqual('awaiting_readback',self.history.status('2'*32)['state'])
+    def test_comparison_is_pinned_and_does_not_acknowledge(self):
+        with self.backend() as backend:
+            self.dispatch(backend)
+            input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+            observed = input_frame_evidence.inspect(self.history,'2'*32,self.root/'evidence')
+            reference = self.root/'reference.png'
+            reference.write_bytes(png())
+            pin = hashlib.sha256(reference.read_bytes()).hexdigest()
+            args = (self.history,'2'*32,self.root/'evidence',observed['frame_sha256'],
+                    observed['evidence_intent_sha256'],reference,pin,(0,0,2,2))
+            posts = list(self.api.posts)
+            result = input_frame_evidence.compare(*args)
+            self.assertTrue(result['matched'])
+            self.assertFalse(result['capture_time_verified'])
+            self.assertFalse(result['action_caused_verified'])
+            self.assertFalse(result['semantic_state_verified'])
+            self.assertFalse(result['acknowledged'])
+            self.assertEqual(posts,self.api.posts)
+            self.assertEqual('awaiting_readback',self.history.status('2'*32)['state'])
+            wrong = list(args)
+            wrong[4] = 'f'*64
+            with self.assertRaises(FoundryError): input_frame_evidence.compare(*wrong)
+            wrong = list(args)
+            wrong[6] = 'f'*64
+            with self.assertRaises(FoundryError): input_frame_evidence.compare(*wrong)
+            reference.write_bytes(rgba(2,2,(0,0,0,255)))
+            different = list(args)
+            different[6] = hashlib.sha256(reference.read_bytes()).hexdigest()
+            self.assertFalse(input_frame_evidence.compare(*different)['matched'])
+            self.assertEqual(posts,self.api.posts)
+            original_compare = visual_probe.compare
+            def change_during_compare(*values, **kwargs):
+                result = original_compare(*values, **kwargs)
+                (self.root/'evidence'/'evidence-complete.json').write_text('{}',encoding='utf-8')
+                return result
+            with mock.patch.object(visual_probe,'compare',side_effect=change_during_compare):
+                with self.assertRaises(FoundryError): input_frame_evidence.compare(*different)
     def test_invalid_frame_is_refused_before_output(self):
         with self.backend() as backend:
             self.dispatch(backend)
