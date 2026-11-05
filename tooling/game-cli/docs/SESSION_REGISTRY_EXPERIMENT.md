@@ -31,3 +31,10 @@ verification, and explicit reconciliation of a persisted record whose anchor
 did not advance remain required. No command enables game input from this
 registry. Its tests use synthetic process identities and files outside the game
 and profile; they are not live-game qualification.
+
+`SQLiteAnchor` supplies an explicit local database with full-synchronous
+SQLite transactions and cross-process compare-and-swap for cooperative
+experiments. It can detect a removed chain tail while its head is intact, but
+does not prevent another same-user process from replacing or rolling back both
+the database and chain. It is not an independently protected anchor and does
+not qualify production input or exit.
