@@ -1022,3 +1022,24 @@ native transform/readback remains an unverified mutation, without verified undo
 or transaction semantics. Exact-head CI for this source checkpoint is pending.
 See [BUILD_TRANSFORM_ROUTE.md](BUILD_TRANSFORM_ROUTE.md) for integration interfaces,
 required bindings, single-dispatch behavior and remaining unsupported operations.
+
+## Standalone input and capture owned fixtures
+
+The experimental path joins an exact process witness, cooperative session
+registry, durable input journal, native Windows packet sender and WGC recorder.
+An opt-in Windows fixture ran that path against its own Python process and
+window, using a patched identity validator and inspector limited to that target.
+It observed the specified native down/up messages and expected center-pixel
+change in a later received WGC frame. Its fixture journal remains awaiting
+readback and is preserved locally with a DPAPI-protected fixture key. These
+results do not establish capture time, causal game state, authenticated host
+observation or Sims compatibility.
+
+The separately compiled disposable Windows fixture ran the retained sender and
+journal with real Win32 bindings and a synthetic recorder. The exact
+`6c853f51f9976e59a6093b32ca3a4a787847ae3c` checkpoint passed all six
+Windows/Linux offline jobs: https://github.com/Herbertofury/Sims4Foundry/actions/runs/42087367973.
+Earlier Windows 3.11 loopback-exchange failures were intermittent; one failed
+job passed on rerun, and their common cause is not established. Fixture-only
+sanitized diagnostics are present to help investigate a recurrence. No actual
+game or profile was accessed for these tests.
