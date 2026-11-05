@@ -128,3 +128,15 @@ reconciliation of unresolved attempts, an independently qualified observation
 and dispatch contract, and real-game tests in the coordinated game window. The
 separate neutral-exit experiment remains gated until its provider and lease
 contracts are met.
+
+## Fixture-only sequential composition
+
+`LiveOwner.fixture_complete_step` composes one fixture-provided synchronous
+observer, the original journal acknowledgement, registry reconciliation and
+one sender cleanup. Only after all of those return does the same owner allow a
+distinct next request. A failure fences the original sender and completion
+attempt; it does not resend input or repeat acknowledgement or cleanup. The
+observer is injected test code, not an authenticated operator, independent
+visual observer or proof of game state. This method is not exposed through the
+CLI or service, and the owner itself still admits only its private same-process
+fixture. The fake-provider tests do not qualify sequential game controls.

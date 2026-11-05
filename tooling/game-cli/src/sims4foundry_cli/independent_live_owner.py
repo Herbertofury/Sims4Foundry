@@ -44,6 +44,7 @@ class LiveOwner:
         self._thread = threading.current_thread()
         self._busy = False
         self._attempted = set()
+        self._completion_attempted = set()
         self._backend, self._backend_open, self._close_attempted = None, False, False
 
     def _owner(self):
@@ -164,9 +165,50 @@ class LiveOwner:
         finally:
             self._busy = False
 
+    def fixture_complete_step(self, request_id, observer):
+        """Fixture-only: acknowledge an explicit trusted observation and retire the sender.
+
+        The observer is injected by the fixture host. It is not authenticated,
+        does not represent an operator, and does not establish game state. Any
+        error after entry fences this sender; never repeat completion or input.
+        """
+        self._owner()
+        if (not input_journal._token(request_id) or not callable(observer)
+                or not self._backend_open or self._close_attempted
+                or request_id not in self._attempted or request_id in self._completion_attempted):
+            raise FoundryError('live_owner_unresolved', 'The original fixture sender and observer are required.')
+        self._completion_attempted.add(request_id)
+        self._busy = True
+        try:
+            with self._witness.guard_for_dispatch(self._registry) as check_live:
+                check_live()
+                self._journal.acknowledge(request_id, observer)
+                check_live()
+                registered_input.reconcile_acknowledged(self._registry,self._journal,request_id)
+                check_live()
+                self._close_sender()
+            # Keep the old sender as the fence until cleanup flags are reset.
+            # An interruption between assignments must not admit a new sender.
+            self._close_attempted = False
+            self._backend = None
+            return {'outcome':'fixture_step_completed', 'request_id':request_id,
+                    'observer_authenticated':False, 'semantic_state_verified':False,
+                    'game_qualified':False, 'os_release_verified':False}
+        except Exception as error:
+            code = error.code if isinstance(error,FoundryError) else None
+            code = code if type(code) is str and re.fullmatch(r'[a-z0-9_]{1,64}',code) else 'other'
+            raise FoundryError('live_owner_completion_unresolved',
+                               'Fixture acknowledgement or sender retirement may have occurred; inspect without replay.',
+                               no_replay=True, original_error_code=code) from None
+        finally:
+            self._busy = False
+
     def close_sender(self):
         """One cleanup attempt for the original sender; never close the witness."""
         self._owner()
+        return self._close_sender()
+
+    def _close_sender(self):
         if not self._backend_open or self._close_attempted:
             raise FoundryError('live_owner_unresolved', 'Original sender cleanup is unavailable or already attempted.')
         self._close_attempted = True
