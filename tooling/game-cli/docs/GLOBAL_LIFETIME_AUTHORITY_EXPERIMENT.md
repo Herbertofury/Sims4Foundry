@@ -23,6 +23,11 @@ Owned synthetic-directory tests cover two concurrent callers, two separate
 Python processes, changed target identity, a lost claim reply and malformed
 records. A read-only check resolved the actual Windows LocalAppData known
 folder. No real authority was initialized, and no game or profile was touched.
-This experiment is not connected to `experimental-live-owner`; live
-admission remains denied pending independent review and a complete shared
-authority lifecycle.
+The installed CLI exposes `foundry-game global-authority initialize`,
+`foundry-game global-authority status`, and `foundry-game global-authority
+inspect --identity ORIGINAL_IDENTITY.json`. Initialization writes to the
+OS-resolved per-user authority location; it does not reserve a process or open
+the game. Do not repeat initialization after an uncertain result. The CLI
+does not expose reservation creation as a standalone action. This experiment
+is not connected to `experimental-live-owner`; live admission remains denied
+pending independent review and a complete shared authority lifecycle.

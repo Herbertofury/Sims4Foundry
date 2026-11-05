@@ -77,6 +77,13 @@ def _authority():
     return root,row['authority_id']
 
 
+def status():
+    """Inspect the OS-located authority without reserving any lifetime."""
+    _,authority_id = _authority()
+    return {'ok':True,'outcome':'global_authority_observed','authority_id':authority_id,
+            'same_user_authenticated':False,'rollback_protected':False,'game_qualified':False}
+
+
 def _lifetime(target):
     selected = input_journal._target(target)
     lifetime = session_registry._lifetime(selected)

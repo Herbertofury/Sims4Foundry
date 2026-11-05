@@ -1,6 +1,9 @@
 """Cross-workspace reservation tests with an owned synthetic OS location."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stdout
 from copy import deepcopy
+import io
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -8,7 +11,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from sims4foundry_cli import global_lifetime_authority as authority
+from sims4foundry_cli import cli, global_lifetime_authority as authority
 from sims4foundry_cli.errors import FoundryError
 from test_guarded_input import identity
 
@@ -83,6 +86,21 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
     def test_initialization_never_replaces_existing_authority(self):
         with self.assertRaises(FoundryError) as error: authority.initialize()
         self.assertEqual('global_authority_exists',error.exception.code)
+
+    def test_cli_status_and_inspection_use_the_same_authority(self):
+        self.claim()
+        original = self.root/'identity.json'
+        original.write_text(json.dumps(identity()),encoding='utf-8')
+        output = io.StringIO()
+        with redirect_stdout(output): self.assertEqual(0,cli.main(['global-authority','status']))
+        self.assertEqual('global_authority_observed',json.loads(output.getvalue())['outcome'])
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0,cli.main(['global-authority','inspect','--identity',str(original)]))
+        self.assertEqual('global_reservation_observed',json.loads(output.getvalue())['outcome'])
+        output = io.StringIO()
+        with redirect_stdout(output): self.assertEqual(2,cli.main(['global-authority','initialize']))
+        self.assertEqual('global_authority_exists',json.loads(output.getvalue())['code'])
 
     def test_tampered_reservation_is_refused_without_replacement(self):
         result = self.claim()

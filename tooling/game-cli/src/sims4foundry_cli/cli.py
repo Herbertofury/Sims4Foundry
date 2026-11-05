@@ -38,6 +38,9 @@ def parser():
     live_owner.add_argument("--ffmpeg", required=True)
     live_owner.add_argument("--ffmpeg-sha256", required=True)
     live_owner.add_argument("--allow-experimental", action="store_true")
+    global_authority = commands.add_parser("global-authority", help="Initialize or inspect experimental cooperative lifetime records")
+    global_authority.add_argument("action", choices=("initialize", "status", "inspect"))
+    global_authority.add_argument("--identity", help="Original external identity JSON for reservation inspection")
     fixture_owner = commands.add_parser("fixture-owner", help="Synthetic retained owner only; never controls the game")
     fixture_owner.add_argument("action", choices=("identity", "serve", "serve-persistent", "client", "receipt", "launch", "interactive"))
     fixture_owner.add_argument("--authority")
@@ -184,6 +187,16 @@ def parser():
 
 
 def run(args):
+    if args.command == "global-authority":
+        from . import global_lifetime_authority
+        if args.action in ("initialize", "status"):
+            if args.identity is not None:
+                raise FoundryError("invalid_arguments", "This action does not accept an identity.")
+            if args.action == "status": return global_lifetime_authority.status()
+            return {"ok":True, **global_lifetime_authority.initialize()}
+        if args.identity is None:
+            raise FoundryError("invalid_arguments", "Original identity JSON is required for reservation inspection.")
+        return {"ok":True, **global_lifetime_authority.inspect(neutral_records.read_json(external_path(args.identity)))}
     if args.command == "experimental-live-owner":
         if not args.allow_experimental:
             raise FoundryError("live_owner_unqualified", "Explicit experimental opt-in is required; this is not game-qualified.")
