@@ -11,6 +11,7 @@ import struct
 import subprocess
 import time
 from .errors import FoundryError
+from .capture_pin import retained_capture_image
 from .io import exact_int, external_path, new_json, plain_path, sha256
 from .path_identity import ascii_lower, same_windows_path
 
@@ -159,8 +160,19 @@ def inspect(pid, executable, expected_sha256, hwnd=None):
 def capture(identity, ffmpeg, expected_ffmpeg_sha256, destination, *, observer=inspect, runner=subprocess.run):
     validate_identity(identity)
     ffmpeg = plain_path(ffmpeg)
-    if ascii_lower(ffmpeg.name) != "ffmpeg.exe" or sha256(ffmpeg) != expected_ffmpeg_sha256:
+    if ascii_lower(ffmpeg.name) != "ffmpeg.exe":
         raise FoundryError("capture_tool_identity", "Use an explicitly selected, hash-pinned ffmpeg.exe.")
+    # Hold every non-root directory plus the exact file, without delete/write
+    # sharing on the image, across the child execution and capture checks.
+    # Hashing by path and reopening later would not bind the executed image.
+    with retained_capture_image(str(ffmpeg), expected_ffmpeg_sha256):
+        result = _capture_held(identity, ffmpeg, expected_ffmpeg_sha256, destination, observer, runner)
+    # A failed handle release must not leave a success receipt.
+    new_json(external_path(destination) / "capture-complete.json", result)
+    return result
+
+
+def _capture_held(identity, ffmpeg, expected_ffmpeg_sha256, destination, observer, runner):
     fresh = observer(identity["pid"], identity["executable"], identity["executable_sha256"], identity["hwnd"])
     same_identity(identity, fresh)
     destination = external_path(destination)
@@ -186,5 +198,4 @@ def capture(identity, ffmpeg, expected_ffmpeg_sha256, destination, *, observer=i
               "width": width, "height": height, "identity": after, "semantic_state_verified": False,
               "visual_review_required": True, "live_input_qualified": False,
               "capture_surface": "WGC window", "capture_geometry_qualified": False}
-    new_json(destination / "capture-complete.json", result)
     return result

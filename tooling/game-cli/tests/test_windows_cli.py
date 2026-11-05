@@ -1,4 +1,4 @@
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from copy import deepcopy
 import io
 import json
@@ -37,6 +37,20 @@ class WindowsContractTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.ffmpeg = self.root / "ffmpeg.exe"
         self.ffmpeg.write_bytes(b"fixture-not-executable")
+        self.pinned = False
+        patcher = mock.patch.object(windows, "retained_capture_image", self.fixture_pin)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @contextmanager
+    def fixture_pin(self, path, expected):
+        if sha256(path) != expected:
+            raise FoundryError("capture_tool_identity", "Fixture hash mismatch.")
+        self.pinned = True
+        try:
+            yield
+        finally:
+            self.pinned = False
 
     def test_identity_fields_and_reuse_are_checked(self):
         before = identity()
@@ -72,6 +86,7 @@ class WindowsContractTests(unittest.TestCase):
 
     def test_capture_validates_png_but_not_semantics(self):
         def runner(argv, **kwargs):
+            self.assertTrue(self.pinned)
             self.assertIn("-n", argv)
             self.assertIn("-nostdin", argv)
             self.assertEqual(30, kwargs["timeout"])
@@ -84,6 +99,7 @@ class WindowsContractTests(unittest.TestCase):
         self.assertFalse(result["semantic_state_verified"])
         self.assertFalse(result["input_sent"])
         self.assertFalse(result["live_input_qualified"])
+        self.assertFalse(self.pinned)
 
     def test_capture_identity_mismatch_never_launches_helper(self):
         changed = identity(); changed["creation_filetime"] += 1
@@ -109,6 +125,22 @@ class WindowsContractTests(unittest.TestCase):
         with self.assertRaises(FoundryError):
             windows.capture(identity(), self.ffmpeg, sha256(self.ffmpeg), self.root / "capture",
                             observer=lambda *args: sequence.pop(0), runner=runner)
+        self.assertFalse((self.root / "capture" / "capture-complete.json").exists())
+
+    def test_pin_cleanup_failure_never_records_capture_complete(self):
+        @contextmanager
+        def failed_cleanup(path, expected):
+            yield
+            raise FoundryError("capture_pin_cleanup_failed", "Fixture cleanup failed.")
+        def runner(argv, **kwargs):
+            Path(argv[-1]).write_bytes(png())
+            return mock.Mock(returncode=0)
+        with mock.patch.object(windows, "retained_capture_image", failed_cleanup):
+            with self.assertRaises(FoundryError) as error:
+                windows.capture(identity(), self.ffmpeg, sha256(self.ffmpeg), self.root / "capture",
+                                observer=lambda *args: identity(), runner=runner)
+        self.assertEqual("capture_pin_cleanup_failed", error.exception.code)
+        self.assertTrue((self.root / "capture" / "frame.png").exists())
         self.assertFalse((self.root / "capture" / "capture-complete.json").exists())
 
     def test_valid_png(self):
