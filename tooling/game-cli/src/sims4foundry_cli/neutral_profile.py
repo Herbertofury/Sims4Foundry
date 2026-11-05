@@ -499,6 +499,33 @@ def recover(session_directory, *, process_check=None):
         return _finish_restore(session, record, prepared, check)
 
 
+def reconcile_restored_receipt(session_directory):
+    """Inspect an existing completion; never move profiles or publish receipts."""
+    _require_windows()
+    with _session_guard(session_directory) as (session, record):
+        _no_launch_reservation(session)
+        prepared, completed, aborted, intent, restored = _records(session, record)
+        _require_state(prepared is not None and completed and not aborted and intent and restored,
+                       'A completed restoration receipt is required.', 'recovery_unavailable')
+        # The guard may create or initialize its sibling lock file. Ordinary
+        # dict equality equates True and 1; canonical JSON digests preserve types.
+        profile, _, _, recovery = _locations(record)
+        def evidence_matches():
+            if _records(session, record) != (prepared, True, False, True, True):
+                return False
+            expected_digest = digest(prepared)
+            return (digest(_read_json(session / 'activation-complete.json')) == expected_digest
+                    and digest(_read_json(session / 'restore-intent.json')) == expected_digest)
+        for _ in range(2):
+            _require_state(evidence_matches() and _restored_locations(record, prepared),
+                           'Restoration evidence or identities differ.', 'recovery_unavailable')
+        return {'ok': True, 'outcome': 'restoration_receipt_observed',
+                'move_performed': False, 'profile_data_mutation_attempted': False,
+                'lock_file_may_be_created_or_initialized': True,
+                'original_profile': str(profile), 'test_profile_preserved': str(recovery),
+                'saved_data_integrity_verified': False, 'launch_authorized': False}
+
+
 def _preserved_test(record, prepared):
     _, _, staging, recovery = _locations(record)
     return (prepared is not None and
