@@ -142,3 +142,13 @@ observer is injected test code, not an authenticated operator, independent
 visual observer or proof of game state. This method is not exposed through the
 CLI or service, and the owner itself still admits only its private same-process
 fixture. The fake-provider tests do not qualify sequential game controls.
+
+`FixtureStepClient` wraps one unused original owner and latches its own caller
+on an uncertain input, completion, or confirmation reply. After an uncertain
+completion it permits only explicit inspection of that same owner; a ready
+completion requires an explicit confirmation, and a confirmed completion can
+be recognized without resending input or cleanup. Mismatched request IDs,
+tokens or fixture status are refused. This caller is an in-process experiment:
+its gate and the owner's gate do not bind other `LiveOwner` instances, other
+processes, direct owner calls, or another authority. No client or owner state
+survives process loss. It is not wired into the service or a game CLI.

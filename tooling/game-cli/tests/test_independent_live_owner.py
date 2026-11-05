@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from sims4foundry_cli import independent_live_owner, input_journal, live_input, registered_input
+from sims4foundry_cli import fixture_step_client, independent_live_owner, input_journal, live_input, registered_input
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import Message
 from sims4foundry_cli.retained_process_witness import RetainedProcessRegistry
@@ -192,6 +192,86 @@ class IndependentLiveOwnerTests(unittest.TestCase):
         with self.assertRaises(FoundryError): self.click('3'*32,'second-evidence')
         with self.assertRaises(FoundryError): self.owner.fixture_complete_step('2'*32, observer)
         self.assertEqual(2, len(self.api.posts))
+
+    def test_fixture_client_recovers_lost_confirmation_before_next_input(self):
+        client = fixture_step_client.FixtureStepClient(self.owner)
+        client.click_once('2'*32,20,30,expected_observation={'mode':'cas'},evidence_directory=self.root/'evidence')
+        def observer(view, target, expected):
+            with self.assertRaises(FoundryError):
+                client.click_once('3'*32,20,30,expected_observation={'mode':'cas'},evidence_directory=self.root/'reentrant')
+            return dict(view, evidence_sha256='b'*64, observation=expected)
+        pin = (mock.patch.object(registered_input, '_retain_record', side_effect=lambda *args:nullcontext())
+               if os.name != 'nt' else nullcontext())
+        confirm = self.owner.fixture_confirm_completion
+        def confirm_then_lose(*args):
+            confirm(*args)
+            raise OSError('lost confirmation reply')
+        with pin, mock.patch.object(self.owner,'fixture_confirm_completion',side_effect=confirm_then_lose):
+            with self.assertRaises(OSError): client.complete(observer)
+        with self.assertRaises(FoundryError):
+            client.click_once('3'*32,20,30,expected_observation={'mode':'cas'},evidence_directory=self.root/'second')
+        self.assertEqual(2,len(self.api.posts))
+        self.assertEqual('confirmed',client.inspect_completion()['completion_state'])
+        self.assertEqual('frame_recorded',client.click_once('3'*32,20,30,expected_observation={'mode':'cas'},
+                                                           evidence_directory=self.root/'second')['outcome'])
+        self.assertEqual(4,len(self.api.posts))
+
+    def test_fixture_client_refuses_a_different_confirmation_token(self):
+        client = fixture_step_client.FixtureStepClient(self.owner)
+        client.click_once('2'*32,20,30,expected_observation={'mode':'cas'},evidence_directory=self.root/'evidence')
+        def observer(view, target, expected):
+            return dict(view, evidence_sha256='b'*64, observation=expected)
+        pin = (mock.patch.object(registered_input, '_retain_record', side_effect=lambda *args:nullcontext())
+               if os.name != 'nt' else nullcontext())
+        confirm = self.owner.fixture_confirm_completion
+        def confirm_then_lose(*args):
+            confirm(*args)
+            raise OSError('lost confirmation reply')
+        with pin, mock.patch.object(self.owner,'fixture_confirm_completion',side_effect=confirm_then_lose):
+            with self.assertRaises(OSError): client.complete(observer)
+        original = self.owner.fixture_completion_snapshot('2'*32)
+        foreign = dict(original, completion_token='f'*32 if original['completion_token'] != 'f'*32 else 'e'*32)
+        with mock.patch.object(self.owner,'fixture_completion_snapshot',return_value=foreign):
+            with self.assertRaises(FoundryError): client.inspect_completion()
+        with self.assertRaises(FoundryError):
+            client.click_once('3'*32,20,30,expected_observation={'mode':'cas'},evidence_directory=self.root/'second')
+        self.assertEqual('confirmed',client.inspect_completion()['completion_state'])
+        self.assertEqual(2,len(self.api.posts))
+
+    def test_fixture_client_recovers_lost_completion_without_repeating_it(self):
+        client = fixture_step_client.FixtureStepClient(self.owner)
+        client.click_once('2'*32,20,30,expected_observation={'mode':'cas'},evidence_directory=self.root/'evidence')
+        def observer(view, target, expected):
+            return dict(view, evidence_sha256='b'*64, observation=expected)
+        pin = (mock.patch.object(registered_input, '_retain_record', side_effect=lambda *args:nullcontext())
+               if os.name != 'nt' else nullcontext())
+        complete = self.owner.fixture_complete_step
+        def complete_then_lose(*args):
+            complete(*args)
+            raise OSError('lost completion reply')
+        with pin, mock.patch.object(self.owner,'fixture_complete_step',side_effect=complete_then_lose):
+            with self.assertRaises(OSError): client.complete(observer)
+        with self.assertRaises(FoundryError):
+            client.click_once('3'*32,20,30,expected_observation={'mode':'cas'},evidence_directory=self.root/'second')
+        self.assertEqual('ready',client.inspect_completion()['completion_state'])
+        with self.assertRaises(FoundryError):
+            client.click_once('3'*32,20,30,expected_observation={'mode':'cas'},evidence_directory=self.root/'second')
+        self.assertEqual('confirmed',client.confirm_inspected()['completion_state'])
+        self.assertEqual('frame_recorded',client.click_once('3'*32,20,30,expected_observation={'mode':'cas'},
+                                                           evidence_directory=self.root/'second')['outcome'])
+        self.assertEqual(4,len(self.api.posts))
+
+    def test_fixture_client_rejects_foreign_inspection_and_second_wrapper(self):
+        client = fixture_step_client.FixtureStepClient(self.owner)
+        with self.assertRaises(FoundryError): fixture_step_client.FixtureStepClient(self.owner)
+        client.click_once('2'*32,20,30,expected_observation={'mode':'cas'},evidence_directory=self.root/'evidence')
+        with mock.patch.object(self.owner,'fixture_complete_step',side_effect=OSError('lost reply')):
+            with self.assertRaises(OSError): client.complete(lambda *args:{})
+        with mock.patch.object(self.owner,'fixture_completion_snapshot',return_value={'completion_state':'confirmed'}):
+            with self.assertRaises(FoundryError): client.inspect_completion()
+        with self.assertRaises(FoundryError):
+            client.click_once('3'*32,20,30,expected_observation={'mode':'cas'},evidence_directory=self.root/'second')
+        self.assertEqual(2,len(self.api.posts))
 
     def test_lost_evidence_result_never_reposts_original_click(self):
         with mock.patch.object(independent_live_owner.input_frame_evidence,'capture',
