@@ -21,6 +21,13 @@ MAX_RECORD = 32768
 TOKEN = re.compile(r"[0-9a-f]{32}\Z")
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 EVENT = re.compile(r"event-([0-9]{4})\.json\Z")
+# Diagnostics are reports from the runner, not proof of a pre-dispatch failure.
+_PUBLIC_RUNNER_CODES = frozenset((
+    "unknown_foreground", "foreground_changed", "integrity_mismatch", "ownership_changed",
+    "recording_unavailable", "recording_unverified", "input_context_unverified",
+    "stale_observation", "invalid_sequence", "input_journal_bound", "post_unresolved",
+    "release_unresolved", "recording_start_failed", "input_preparation_failed",
+))
 
 
 def _require(value, code, message):
@@ -262,9 +269,13 @@ class InputJournal:
                          "invalid_input_result", "Input result is invalid.")
                 state = {"queue_only":"awaiting_readback", "unresolved":"unresolved",
                          "not_dispatched":"rejected"}[returned["outcome"]]
-            except Exception:
-                # A failed persistence or backend call may follow a post.
-                returned, state = None, "unresolved"
+            except Exception as error:
+                # An escaped exception may follow a post or an unacknowledged
+                # journal write. Report only a fixed code; never infer non-dispatch.
+                code = error.code if isinstance(error, FoundryError) else None
+                code = code if type(code) is str and code in _PUBLIC_RUNNER_CODES else "other"
+                returned, state = {"diagnostic_source":"runner_exception", "diagnostic_code":code,
+                                   "input_attempted":"unknown", "no_replay":True}, "unresolved"
                 try:
                     count, previous = self._events(run)
                 except Exception:

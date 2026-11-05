@@ -109,6 +109,7 @@ class LiveServiceTests(unittest.TestCase):
         self.assertFalse(result['cleanup_verified'])
         retained = independent_live_service._UNRESOLVED[-1]
         self.assertIsNotNone(retained['lease'])
+        self.assertEqual(identity()['hwnd'],retained['fixture_hwnd'])
         self.assertFalse((self.session/'live-owner-stop-receipt.json').exists())
         # These are fabricated API handles; explicitly clean this known fixture.
         retained['lease'].close()

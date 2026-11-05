@@ -167,4 +167,7 @@ as a successful sequential test. The original evidence is retained locally;
 the attempt must not be replayed or its uncertain cleanup repeated. A later
 owned-window run, if separately arranged, emits only allowlisted diagnostic
 codes for runner exceptions and retains the window while original owned
-resources remain unresolved. In-process retention does not survive process exit.
+resources remain unresolved. For the service fixture it also correlates an
+unresolved service entry with the original fixture HWND; an unavailable binding
+retains the window conservatively. In-process retention does not survive process
+exit or prove that a child or OS handle has closed.

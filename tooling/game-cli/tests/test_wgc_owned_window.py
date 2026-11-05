@@ -27,7 +27,19 @@ def _stop_or_retain(thread, stop, state, unresolved):
     return not thread.is_alive() and state['destroyed'] and state['unregistered']
 
 
+def _fixture_service_retentions(entries, hwnd):
+    result = []
+    for item in entries:
+        value = item.get('fixture_hwnd') if type(item) is dict else None
+        result.append({'hwnd':value if type(value) is int and value > 0 else hwnd})
+    return result
+
+
 class WgcFixtureOwnershipTests(unittest.TestCase):
+    def test_service_retention_uses_original_or_unknown_window_binding(self):
+        rows = _fixture_service_retentions([{'fixture_hwnd':123},{'fixture_hwnd':456}, {}, None],123)
+        self.assertEqual([{'hwnd':123},{'hwnd':456},{'hwnd':123},{'hwnd':123}],rows)
+
     def test_unresolved_child_retains_window_without_stop(self):
         class Thread:
             def join(self, **kwargs): raise AssertionError('Must not join retained owner')
@@ -204,6 +216,10 @@ class WgcOwnedWindowTests(unittest.TestCase):
                 elif os.environ.get('FOUNDRY_WGC_REGISTERED_TEST') == '1':
                     from registered_owned_fixture import _OWNED_UNRESOLVED
                     unresolved = [{'hwnd':item[4]} for item in _OWNED_UNRESOLVED if len(item) > 4]
+                    if os.environ.get('FOUNDRY_WGC_LIVE_SERVICE_TEST') == '1':
+                        from sims4foundry_cli.independent_live_service import _UNRESOLVED as service_unresolved
+                        # A malformed/missing binding is not proof this window is free.
+                        unresolved += _fixture_service_retentions(service_unresolved,state['window'])
                 if not _stop_or_retain(thread,stop,state,unresolved) or not done.is_set():
                     raise AssertionError('Owned capture window or thread cleanup is unresolved')
 

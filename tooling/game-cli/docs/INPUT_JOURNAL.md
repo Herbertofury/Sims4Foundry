@@ -67,3 +67,15 @@ foreign/mutated acknowledgements, lost post/attempt/result replies,
 interruption/reopen, corruption, no-replay and blocking dependent controls.
 It does not send Windows messages, start a game, test a real WGC recording or
 prove the intended CAS/Live/Build interaction.
+
+## Bounded unresolved diagnostics
+
+If the packet runner raises an ordinary exception, the original unresolved
+result records `diagnostic_source: runner_exception` and an allowlisted public
+`diagnostic_code` (or `other`). It omits exception messages and preserves
+`input_attempted: unknown` and `no_replay: true`. The code is a trusted-host
+report, not proof that the error happened before dispatch or that no packet was
+accepted. Failures before the runner, inside result publication, or represented
+instead by the runner's returned result have different reporting paths. Missing
+diagnostics or a lost result publication remain unresolved. Older journals
+with a null result remain readable.

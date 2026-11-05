@@ -106,6 +106,38 @@ class InputJournalTests(unittest.TestCase):
         self.assertEqual('unresolved',result['state'])
         self.assertEqual([],self.backend.posts)
         self.assertEqual('unresolved',self.journal.status(self.id)['state'])
+    def test_runner_exception_reports_bounded_code_and_remains_unresolved(self):
+        with mock.patch.object(self.backend,'foreground',side_effect=FoundryError('foreground_changed','PRIVATE')):
+            result = self.journal.execute_once(self.id,self.packets,self.backend,expected_observation={'mode':'cas'})
+        self.assertEqual('unresolved',result['state'])
+        self.assertEqual({'diagnostic_source':'runner_exception','diagnostic_code':'foreground_changed',
+                          'input_attempted':'unknown','no_replay':True},result['result'])
+        self.assertEqual(result['result'],input_journal.InputJournal(self.root).status(self.id)['result'])
+        self.assertNotIn('PRIVATE',json.dumps(result))
+        with self.assertRaises(FoundryError):
+            self.journal.execute_once('3'*32,self.packets,FakeBackend(),expected_observation={'mode':'cas'})
+        self.assertEqual([],self.backend.posts)
+
+    def test_escaped_runner_error_after_possible_effect_is_never_labeled_not_dispatched(self):
+        def effect_then_fail(*args):
+            self.backend.posts.append(('possible_effect',None))
+            raise FoundryError('foreground_changed','PRIVATE')
+        with mock.patch.object(input_journal,'run_packets',side_effect=effect_then_fail):
+            result = self.journal.execute_once(self.id,self.packets,self.backend,expected_observation={'mode':'cas'})
+        self.assertEqual('unresolved',result['state'])
+        self.assertEqual('unknown',result['result']['input_attempted'])
+        self.assertTrue(result['result']['no_replay'])
+        with self.assertRaises(FoundryError):
+            self.journal.execute_once('3'*32,self.packets,FakeBackend(),expected_observation={'mode':'cas'})
+        self.assertEqual(1,len(self.backend.posts))
+
+    def test_unknown_runner_error_diagnostic_does_not_expose_exception(self):
+        with mock.patch.object(self.backend,'foreground',side_effect=FoundryError('account_PRIVATE','PRIVATE')):
+            result = self.journal.execute_once(self.id,self.packets,self.backend,expected_observation={'mode':'cas'})
+        self.assertEqual('other',result['result']['diagnostic_code'])
+        self.assertEqual('unknown',result['result']['input_attempted'])
+        self.assertNotIn('PRIVATE',json.dumps(result))
+
     def test_result_write_failure_does_not_replay(self):
         original = input_journal._write
         def fail(path,value):

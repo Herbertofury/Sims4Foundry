@@ -49,7 +49,8 @@ def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream
         raise FoundryError('live_owner_unresolved', 'Original owner was already attempted; inspect without reacquiring.') from None
     # The marker is published before either an image pin or process handle is
     # acquired. Windows power-loss durability is not established.
-    retained = {'api':None,'image':None,'provider':None,'ticket':None,'lease':None,'owner':None}
+    retained = {'api':None,'image':None,'provider':None,'ticket':None,'lease':None,'owner':None,
+                'fixture_hwnd':target['hwnd']}
     _UNRESOLVED.append(retained)
     try:
         api = native_input._NativeApi()
