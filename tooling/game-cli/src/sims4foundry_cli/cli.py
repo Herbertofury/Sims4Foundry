@@ -25,6 +25,22 @@ def parser():
     session.add_argument("action", choices=("create", "status", "observe"))
     session.add_argument("--directory", required=True)
     session.add_argument("--backend", choices=("simulation", "windows"), default="simulation")
+    independent = commands.add_parser("independent-session", help="Create or inspect cooperative records; live input remains disabled")
+    independent.add_argument("action", choices=("authority-init", "initialize", "fixture-initialize", "status", "input-status", "input-once"))
+    independent.add_argument("--authority", required=True)
+    independent.add_argument("--session")
+    independent.add_argument("--identity", help="External Foundry identity JSON; accepted as supplied, never inspected live")
+    independent.add_argument("--request-id")
+    fixture_owner = commands.add_parser("fixture-owner", help="Synthetic retained owner only; never controls the game")
+    fixture_owner.add_argument("action", choices=("identity", "serve", "serve-persistent", "client", "receipt", "launch", "interactive"))
+    fixture_owner.add_argument("--authority")
+    fixture_owner.add_argument("--session")
+    fixture_owner.add_argument("--endpoint")
+    fixture_owner.add_argument("--request", help="Bounded fixture request JSON; secret arrives only through stdin")
+    fixture_owner.add_argument("--count", type=int)
+    fixture_owner.add_argument("--owner-id")
+    fixture_owner.add_argument("--operation-id")
+    fixture_owner.add_argument("--requests", help="Bounded JSON list of synthetic operation templates")
     companion = commands.add_parser("companion", help="Read existing local companion history only; no network or execution")
     companion.add_argument("action", choices=("journal-status",))
     companion.add_argument("--directory", required=True)
@@ -161,6 +177,66 @@ def parser():
 
 
 def run(args):
+    if args.command == "fixture-owner":
+        from . import fixture_launcher
+        if args.action == "identity":
+            if any(value is not None for value in (args.authority, args.session, args.endpoint, args.request, args.count,
+                                                   args.owner_id, args.operation_id, args.requests)):
+                raise FoundryError("invalid_arguments", "Fixture identity accepts no options.")
+            return {"ok": True, "identity": fixture_launcher.FIXTURE_IDENTITY,
+                    "game_qualified": False, "live_dispatch_available": False}
+        if args.action in ("serve-persistent", "interactive"):
+            if (not args.authority or not args.session or args.endpoint is not None or args.request is not None or
+                    args.count is not None or args.owner_id is not None or args.operation_id is not None or args.requests is not None):
+                raise FoundryError("invalid_arguments", "Persistent fixture mode requires its authority and session only.")
+            from . import fixture_interactive
+            if args.action == "serve-persistent":
+                return fixture_interactive.serve(args.authority, args.session)
+            return fixture_interactive.launch(args.authority, args.session)
+        if args.action == "serve":
+            if (not args.authority or not args.session or args.endpoint is not None or args.request is not None or
+                    args.owner_id is not None or args.operation_id is not None or args.requests is not None):
+                raise FoundryError("invalid_arguments", "Fixture serve requires its original authority and session only.")
+            return fixture_launcher.serve(args.authority, args.session, count=1 if args.count is None else args.count)
+        if args.action == "receipt":
+            if (not args.authority or not args.session or not args.owner_id or not args.operation_id or
+                    args.endpoint is not None or args.request is not None or args.count is not None or args.requests is not None):
+                raise FoundryError("invalid_arguments", "Receipt inspection requires original session, owner and operation IDs.")
+            return fixture_launcher.inspect_receipt(args.authority, args.session, args.owner_id, args.operation_id)
+        if args.action == "launch":
+            if (not args.authority or not args.session or args.requests is None or args.endpoint is not None or
+                    args.request is not None or args.count is not None or args.owner_id is not None or args.operation_id is not None):
+                raise FoundryError("invalid_arguments", "Fixture launcher requires authority, session and request list only.")
+            return fixture_launcher.launch(args.authority, args.session, loads(args.requests))
+        if (args.authority is not None or args.session is not None or args.count is not None or not args.endpoint or
+                args.request is None or args.owner_id is not None or args.operation_id is not None or args.requests is not None):
+            raise FoundryError("invalid_arguments", "Fixture client requires only endpoint and exact request JSON.")
+        return fixture_launcher.client(args.endpoint, loads(args.request))
+    if args.command == "independent-session":
+        from . import independent_session
+        if args.action == "input-once":
+            return independent_session.submit_input_once()
+        if args.action == "authority-init":
+            if args.session is not None or args.identity is not None or args.request_id is not None:
+                raise FoundryError("invalid_arguments", "Authority initialization accepts only its new directory.")
+            return independent_session.initialize_authority(args.authority)
+        if args.session is None:
+            raise FoundryError("invalid_arguments", "An explicit independent session directory is required.")
+        if args.action == "fixture-initialize":
+            if args.identity is not None or args.request_id is not None:
+                raise FoundryError("invalid_arguments", "Fixture initialization uses only the built-in synthetic identity.")
+            from .fixture_launcher import FIXTURE_IDENTITY
+            return independent_session.initialize_session(args.authority, args.session, FIXTURE_IDENTITY)
+        if args.action == "initialize":
+            if args.identity is None or args.request_id is not None:
+                raise FoundryError("invalid_arguments", "Initialization requires only one external identity record.")
+            return independent_session.initialize_session(args.authority, args.session,
+                                                         neutral_records.read_json(external_path(args.identity)))
+        if args.identity is not None or (args.action == "status" and args.request_id is not None):
+            raise FoundryError("invalid_arguments", "Status does not accept a replacement identity or request ID.")
+        if args.action == "input-status" and args.request_id is None:
+            raise FoundryError("invalid_arguments", "Input status requires the original request ID.")
+        return independent_session.status(args.authority, args.session, args.request_id)
     if args.command == "startup-probe-report":
         from .startup_probe_report import inspect_startup_probe
         return inspect_startup_probe(args.report, args.manifest,
