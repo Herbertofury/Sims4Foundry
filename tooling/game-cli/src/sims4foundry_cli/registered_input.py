@@ -3,10 +3,18 @@
 The registry and observer remain trusted experimental providers. This module
 does not establish a canonical authority, verify game semantics or open a game.
 """
-from . import input_journal
+from contextlib import ExitStack
+
+from . import capture_pin, companion_build, input_journal
 from .errors import FoundryError
 from .io import canonical, digest, lock
 from .session_registry import SessionRegistry, _lifetime
+
+
+def _retain_record(path, checksum):
+    """Retain the exact Windows record and its parent path until resolution."""
+    return capture_pin._retain(str(path), checksum, capture_pin._WindowsApi(),
+                               image_basename=None, max_image_bytes=input_journal.MAX_RECORD)
 
 
 def journal_binding(journal):
@@ -56,14 +64,27 @@ def reconcile_acknowledged(registry, journal, request_id):
     if (len(events) < 2 or events[-1].get('kind') != 'attempt'
             or events[-1].get('operation') != 'input' or events[-1].get('request_id') != request_id):
         raise FoundryError('registry_binding', 'No matching original input attempt is pending.')
-    with lock(journal.root / 'operation.lock'):
+    with lock(journal.root / 'operation.lock'), ExitStack() as retained:
         journal._verify()
         status = journal._status(request_id)
         if (status['state'] != 'acknowledged_by_host'
                 or status['intent_sha256'] != events[-1]['intent_sha256']):
             raise FoundryError('registry_pending', 'The original input lacks matching host acknowledgement.')
-        receipt = input_journal._read(journal.root / 'runs' / request_id / 'ack.json')
-        if (receipt.get('request_id') != request_id or receipt.get('session_id') != journal.session['session_id']
-                or receipt.get('intent_sha256') != status['intent_sha256']):
+        run = journal.root / 'runs' / request_id
+        event_files = sorted((run / 'events').iterdir())
+        paths = ([journal.root / 'session.json', run / 'intent.json', run / 'attempt.json',
+                  run / 'result.json', run / 'ack.json'] + event_files)
+        for path in paths:
+            _, checksum, _ = companion_build._regular(path, input_journal.MAX_RECORD)
+            retained.enter_context(_retain_record(path, checksum))
+        # Revalidate the full receipt and all journal links only after the
+        # exact files and their directory paths are held. The gate resolution
+        # runs while both the cooperative lock and those pins remain held.
+        journal._verify()
+        verified = journal._status(request_id)
+        if (verified['state'] != 'acknowledged_by_host'
+                or verified['intent_sha256'] != events[-1]['intent_sha256']
+                or sorted((run / 'events').iterdir()) != event_files):
             raise FoundryError('registry_pending', 'The original acknowledgement changed during reconciliation.')
-    return registry.resolve(request_id, status['intent_sha256'], digest(receipt), 'acknowledged')
+        receipt = input_journal._read(run / 'ack.json')
+        return registry.resolve(request_id, verified['intent_sha256'], digest(receipt), 'acknowledged')

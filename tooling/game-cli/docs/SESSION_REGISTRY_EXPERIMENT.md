@@ -14,7 +14,11 @@ path and session record, registers the immutable input intent before calling the
 journal, and keeps the common gate pending until an acknowledgement for that
 same intent is present. A registry or journal failure leaves it pending. This
 only coordinates callers that use these functions and the same authority. The
-path binding does not retain a directory handle or prevent a same-path replace.
+path binding alone does not retain a directory handle. On Windows,
+acknowledgement reconciliation pins each validated record and its ancestor path
+through the registry update and repeats full journal validation under those
+pins. This does not prevent the creation of new files in a pinned directory or
+protect other lifecycle stages against same-path replacement.
 
 The key, anchor and common registry directory are supplied by the hosting
 authority. The module does not create or authenticate that authority, store a
@@ -38,3 +42,11 @@ experiments. It can detect a removed chain tail while its head is intact, but
 does not prevent another same-user process from replacing or rolling back both
 the database and chain. It is not an independently protected anchor and does
 not qualify production input or exit.
+
+`windows_registry_key` can explicitly create and reopen a random registry key
+protected by Windows DPAPI for the current user, scoped to a chosen digest. A
+Windows fixture has exercised reopening it in a separate owned process. This
+protects key material at rest from other accounts under ordinary DPAPI policy;
+it does not authenticate other programs running as the same user, prevent key
+file replacement, ensure secure memory, or make the SQLite anchor rollback
+resistant. Treat the key, authority and anchor as experimental together.

@@ -1,5 +1,8 @@
 """Shared registry/journal integration with synthetic providers only."""
 from pathlib import Path
+from contextlib import nullcontext
+import json
+import os
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -26,6 +29,11 @@ class RegisteredInputTests(unittest.TestCase):
         self.registry.open_session('1'*32, registered_input.journal_binding(self.journal))
         self.backend = FakeBackend()
         self.packets = encode_click(Point(20,30), ClientBounds(500,500))
+        if os.name != 'nt':
+            # Non-Windows exercises orchestration only, not the native pin.
+            patcher = mock.patch.object(registered_input, '_retain_record', side_effect=lambda *args:nullcontext())
+            patcher.start()
+            self.addCleanup(patcher.stop)
     def execute(self):
         return registered_input.execute_once(self.registry,self.journal,'2'*32,self.packets,self.backend,
                                              expected_observation={'mode':'cas'})
@@ -69,6 +77,39 @@ class RegisteredInputTests(unittest.TestCase):
                 self.assertFalse(result['result']['semantic_success'])
         self.assertEqual(2, len(api.posts))
         self.assertEqual('attempt', self.registry.inspect()['events'][-1]['kind'])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows retained-file behavior')
+    def test_changed_ack_during_pin_is_refused(self):
+        self.execute()
+        self.journal.acknowledge('2'*32, lambda view,target,expected:
+                                 dict(view,evidence_sha256='a'*64,observation=expected))
+        original = registered_input._retain_record
+        def replace_before_pin(path, checksum):
+            if path.name == 'ack.json':
+                data = json.loads(path.read_bytes())
+                data['evidence_sha256'] = 'b'*64
+                path.write_text(json.dumps(data))
+            return original(path, checksum)
+        with mock.patch.object(registered_input, '_retain_record', side_effect=replace_before_pin):
+            with self.assertRaises(FoundryError):
+                registered_input.reconcile_acknowledged(self.registry,self.journal,'2'*32)
+        self.assertEqual('attempt', self.registry.inspect()['events'][-1]['kind'])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows retained-file behavior')
+    def test_ack_path_cannot_be_replaced_during_resolution(self):
+        self.execute()
+        self.journal.acknowledge('2'*32, lambda view,target,expected:
+                                 dict(view,evidence_sha256='a'*64,observation=expected))
+        path = self.journal.root/'runs'/('2'*32)/'ack.json'
+        replacement = path.with_name('replacement.json')
+        replacement.write_bytes(path.read_bytes())
+        resolve = self.registry.resolve
+        def while_pinned(*args):
+            with self.assertRaises(OSError): os.replace(replacement, path)
+            return resolve(*args)
+        with mock.patch.object(self.registry, 'resolve', side_effect=while_pinned):
+            registered_input.reconcile_acknowledged(self.registry,self.journal,'2'*32)
+        self.assertEqual('resolved', self.registry.inspect()['events'][-1]['kind'])
 
 
 if __name__ == '__main__': unittest.main()
