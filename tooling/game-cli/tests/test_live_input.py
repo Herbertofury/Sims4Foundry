@@ -22,6 +22,7 @@ class FakeLease:
 class FakeApi:
     def __init__(self):
         self.posts = []
+        self.packets = []
         self.on_post = None
         self.owned = True
         self.focus = 12
@@ -42,6 +43,7 @@ class FakeApi:
     def window_owner(self, expected): pass
     def post(self, hwnd, packet):
         self.posts.append((hwnd, packet.message))
+        self.packets.append(packet)
         return self.on_post(packet) if self.on_post else True
 
 

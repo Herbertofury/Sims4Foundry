@@ -28,7 +28,11 @@ of ownership, process exit, crash or an unknown native result.
 The preflight deadline is checked again after the final foreground call, but
 the target, foreground or scene may still change before the non-atomic post.
 The registered wrapper also refuses to send a release when its matching down
-never reached the backend.
+never reached the backend. A drag release uses the last point actually or
+possibly forwarded to the native sender: a known preflight or explicit native
+refusal keeps the previous point, while a lost move reply keeps the attempted
+point. The runner validates the resulting release against the original plan.
+The registry, journal and wrapper use a detached reconstruction of that plan.
 
 Do not enable dependent controls, normal exit, or a production CLI route on
 the strength of these fixtures. Integration requires a shared session authority,

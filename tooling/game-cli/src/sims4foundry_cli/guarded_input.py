@@ -120,6 +120,17 @@ def run_packets(expected, packets, backend, journal):
                 raise FoundryError("ownership_changed", "Original ownership is unverified; never release to a replacement.")
             equal_integrity()
             packet = release if release.coordinate_space is CoordinateSpace.NONE else replace(release, lparam=last_point)
+            prepare = getattr(backend, "prepare_release", None)
+            if prepare is not None:
+                # The optional in-memory adapter returns the last point actually
+                # attempted by its native sender. It must perform no OS or disk I/O.
+                packet = prepare(packet)
+                if (type(packet) is not InputPacket or
+                        (release.coordinate_space is CoordinateSpace.NONE and packet != release) or
+                        (release.coordinate_space is not CoordinateSpace.NONE and
+                         (packet.lparam not in {item.lparam for item in packets if not item.release_intent}
+                          or packet != replace(release, lparam=packet.lparam)))):
+                    raise FoundryError("invalid_release", "Prepared release differs from the original packet plan.")
             # No recorder, viewport, sleep, timing or optional disk operations here.
             accepted = backend.post(expected["hwnd"], packet)
             events.append({"message": int(packet.message), "release": True, "accepted": accepted is True})

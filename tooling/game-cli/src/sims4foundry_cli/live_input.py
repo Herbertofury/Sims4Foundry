@@ -215,6 +215,7 @@ class LiveInputBackend:
                      "stale_observation", "Final foreground check exceeded the preflight time budget.")
             if packet.message in (Message.LEFT_DOWN,Message.RIGHT_DOWN,Message.KEY_DOWN):
                 self._held = True
+            previous_point = self._last_point
             self._last_point = packet.lparam
         try:
             accepted = self._api.post(hwnd, packet)
@@ -225,6 +226,8 @@ class LiveInputBackend:
             self._uncertain = True
             if accepted is False and not packet.release_intent and packet.message in (Message.LEFT_DOWN,Message.RIGHT_DOWN,Message.KEY_DOWN):
                 self._held = False
+            if accepted is False and not packet.release_intent and packet.message is Message.MOUSE_MOVE:
+                self._last_point = previous_point
             _require(accepted is False, "post_unresolved", "Packet acceptance is unknown.")
             return False
         if packet.release_intent:
@@ -246,6 +249,11 @@ class LiveInputBackend:
     @property
     def unresolved(self):
         return self._uncertain or self._held
+
+    def _release_position(self):
+        """Last point actually attempted at the native boundary; no OS I/O."""
+        self._context()
+        return self._last_point
 
     def _cleanup(self):
         clean = True

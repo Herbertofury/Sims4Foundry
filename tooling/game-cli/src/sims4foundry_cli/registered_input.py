@@ -11,6 +11,7 @@ from . import capture_pin, companion_build, input_journal
 from .errors import FoundryError
 from .io import canonical, digest, lock
 from .input_packets import CoordinateSpace, Message
+from .live_input import LiveInputBackend
 from .session_registry import SessionRegistry, _lifetime
 from .session_witness import SessionWitness
 
@@ -51,23 +52,35 @@ class _WitnessBoundBackend:
         self._hwnd = hwnd
         self._release = packets[-1] if packets[-1].release_intent else None
         self._last_point = packets[0].lparam
+        self._release_points = frozenset(packet.lparam for packet in packets if not packet.release_intent)
     def __getattr__(self, name):
         return getattr(self._backend, name)
+    def prepare_release(self, packet):
+        """Normalize a release to the last attempted point, without I/O."""
+        if not packet.release_intent or not self._held or self._release is None:
+            raise FoundryError('invalid_release', 'No original input reached the backend.')
+        expected = self._release
+        if expected.coordinate_space is not CoordinateSpace.NONE:
+            if packet.lparam not in self._release_points or packet != replace(expected, lparam=packet.lparam):
+                raise FoundryError('invalid_release', 'Release differs from the original packet plan.')
+            point = (self._backend._release_position() if type(self._backend) is LiveInputBackend
+                     else self._last_point)
+            if point not in self._release_points:
+                raise FoundryError('invalid_release', 'Backend release position differs from the original plan.')
+            return replace(expected, lparam=point)
+        if packet != expected:
+            raise FoundryError('invalid_release', 'Release differs from the original packet plan.')
+        return expected
     def post(self, hwnd, packet):
         if type(hwnd) is not int or hwnd != self._hwnd:
             raise FoundryError('ownership_changed', 'Only the originally bound window may receive input.')
-        if packet.release_intent and not self._held:
-            raise FoundryError('invalid_release', 'No original input reached the backend.')
         if packet.release_intent:
-            expected = self._release
-            if expected is not None and expected.coordinate_space is not CoordinateSpace.NONE:
-                expected = replace(expected, lparam=self._last_point)
-            if packet != expected:
-                raise FoundryError('invalid_release', 'Release differs from the original packet plan.')
+            packet = self.prepare_release(packet)
         self._check_live()
         down = packet.message in (Message.LEFT_DOWN, Message.RIGHT_DOWN, Message.KEY_DOWN)
         if down:
             self._held = True
+        previous_point = self._last_point
         if not packet.release_intent:
             self._last_point = packet.lparam
         if packet.release_intent:
@@ -75,6 +88,8 @@ class _WitnessBoundBackend:
         result = self._backend.post(hwnd, packet)
         if down and result is False:
             self._held = False
+        if packet.message is Message.MOUSE_MOVE and result is False:
+            self._last_point = previous_point
         return result
 
 
@@ -84,7 +99,7 @@ def execute_once(registry, journal, request_id, packets, backend, *, expected_ob
     if not input_journal._token(request_id):
         raise FoundryError('invalid_request', 'An exact request ID is required.')
     target = input_journal._target(journal.session['target'])
-    _, wire = input_journal._packets(packets, target)
+    packets, wire = input_journal._packets(packets, target)
     expectation = input_journal._expectation(expected_observation)
     intent = {'schema':1, 'request_id':request_id, 'session_id':journal.session['session_id'],
               'target':target, 'packets':wire, 'expectation':expectation}

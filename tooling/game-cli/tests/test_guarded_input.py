@@ -50,6 +50,12 @@ class GuardedInputTests(unittest.TestCase):
         self.assertFalse(result["game_qualified"])
         self.assertEqual([Message.LEFT_DOWN, Message.LEFT_UP], [p.message for _,p in self.backend.posts])
 
+    def test_release_preparer_cannot_redirect_outside_packet_plan(self):
+        self.backend.prepare_release = lambda packet: replace(packet, lparam=(40 << 16) | 40)
+        result = self.run_sequence()
+        self.assertEqual('unresolved', result['outcome'])
+        self.assertEqual([Message.LEFT_DOWN], [packet.message for _,packet in self.backend.posts])
+
     def test_caller_and_audit_target_mutations_cannot_change_owned_binding(self):
         for target_kind in ("caller", "audit"):
             for stage in ("before_dispatch", "after_down"):

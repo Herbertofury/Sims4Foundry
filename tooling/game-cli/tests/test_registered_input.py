@@ -10,7 +10,7 @@ from unittest import mock
 
 from sims4foundry_cli import input_journal, live_input, registered_input
 from sims4foundry_cli.errors import FoundryError
-from sims4foundry_cli.input_packets import Point, ClientBounds, encode_click
+from sims4foundry_cli.input_packets import Point, ClientBounds, Message, encode_click, encode_drag
 from sims4foundry_cli.session_registry import SessionRegistry
 from sims4foundry_cli.session_witness import SessionWitness
 from sims4foundry_cli.retained_process_witness import RetainedProcessRegistry
@@ -61,6 +61,25 @@ class RegisteredInputTests(unittest.TestCase):
         self.assertEqual([], self.backend.posts)
         with self.assertRaises(FoundryError): self.execute()
         self.assertEqual([], self.backend.posts)
+    def test_original_packet_mutation_during_anchor_does_not_change_dispatch(self):
+        original_point = self.packets[0].lparam
+        cas = self.anchor.compare_and_swap
+        def mutate(*args):
+            for packet in self.packets:
+                object.__setattr__(packet, 'lparam', (40 << 16) | 40)
+            return cas(*args)
+        with mock.patch.object(self.anchor, 'compare_and_swap', side_effect=mutate):
+            self.assertEqual('awaiting_readback', self.execute()['state'])
+        self.assertEqual([original_point,original_point], [packet.lparam for _,packet in self.backend.posts])
+    def test_original_release_mutation_after_down_does_not_block_snapshot_release(self):
+        original_point = self.packets[-1].lparam
+        def mutate(packet):
+            if packet.message is Message.LEFT_DOWN:
+                object.__setattr__(self.packets[-1], 'lparam', (40 << 16) | 40)
+            return True
+        self.backend.failure = mutate
+        self.assertEqual('awaiting_readback', self.execute()['state'])
+        self.assertEqual(original_point, self.backend.posts[-1][1].lparam)
     def test_journal_failure_keeps_shared_gate_pending(self):
         with mock.patch.object(self.journal, 'execute_once', side_effect=OSError('journal unavailable')):
             with self.assertRaises(OSError): self.execute()
@@ -127,6 +146,64 @@ class RegisteredInputTests(unittest.TestCase):
                 self.assertFalse(result['result']['semantic_success'])
         self.assertEqual(2, len(api.posts))
         self.assertEqual('attempt', self.registry.inspect()['events'][-1]['kind'])
+
+    def _drag_with_failure(self, failure):
+        packets = encode_drag((Point(20,30),Point(40,50)),ClientBounds(500,500),duration_ms=5)
+        api = FakeApi()
+        with (mock.patch.object(live_input, '_NativeApi', return_value=api),
+              mock.patch.object(live_input.process_lease, 'process_lease', return_value=FakeLease()),
+              mock.patch.object(live_input, 'WgcRecorder', FakeRecorder),
+              mock.patch.object(live_input, 'os', SimpleNamespace(name='nt'))):
+            with live_input.LiveInputBackend(identity(),packets,'ffmpeg.exe','a'*64) as backend:
+                original_verify = backend.verify_recording
+                def posted(packet):
+                    if packet.message is Message.LEFT_DOWN and failure == 'wrapper':
+                        original_wait = self.witness_api.wait
+                        seen = [False]
+                        def transient(handle, timeout):
+                            if not seen[0]:
+                                seen[0] = True
+                                return WAIT_OBJECT_0
+                            return original_wait(handle, timeout)
+                        self.witness_api.wait = transient
+                    if packet.message is Message.LEFT_DOWN and failure == 'preflight':
+                        count = [0]
+                        def verify():
+                            count[0] += 1
+                            if count[0] == 2: raise FoundryError('recording_unavailable','fixture')
+                            return original_verify()
+                        backend.verify_recording = verify
+                    if packet.message is Message.MOUSE_MOVE and failure == 'refused': return False
+                    if packet.message is Message.MOUSE_MOVE and failure == 'unknown': raise OSError('lost move reply')
+                    return True
+                api.on_post = posted
+                result = registered_input.execute_once(self.registry,self.journal,'2'*32,packets,backend,
+                                                       expected_observation={'mode':'cas'},witness=self.witness)
+        return result, api, packets
+
+    def test_drag_wrapper_refusal_releases_last_forwarded_point(self):
+        result, api, packets = self._drag_with_failure('wrapper')
+        self.assertEqual('unresolved', result['state'])
+        self.assertEqual([Message.LEFT_DOWN,Message.LEFT_UP], [p.message for p in api.packets])
+        self.assertEqual(packets[0].lparam, api.packets[-1].lparam)
+
+    def test_drag_backend_preflight_refusal_releases_last_forwarded_point(self):
+        result, api, packets = self._drag_with_failure('preflight')
+        self.assertEqual('unresolved', result['state'])
+        self.assertEqual([Message.LEFT_DOWN,Message.LEFT_UP], [p.message for p in api.packets])
+        self.assertEqual(packets[0].lparam, api.packets[-1].lparam)
+
+    def test_drag_explicit_move_refusal_releases_previous_point(self):
+        result, api, packets = self._drag_with_failure('refused')
+        self.assertEqual('unresolved', result['state'])
+        self.assertEqual([Message.LEFT_DOWN,Message.MOUSE_MOVE,Message.LEFT_UP], [p.message for p in api.packets])
+        self.assertEqual(packets[0].lparam, api.packets[-1].lparam)
+
+    def test_drag_unknown_move_reply_releases_attempted_point(self):
+        result, api, packets = self._drag_with_failure('unknown')
+        self.assertEqual('unresolved', result['state'])
+        self.assertEqual([Message.LEFT_DOWN,Message.MOUSE_MOVE,Message.LEFT_UP], [p.message for p in api.packets])
+        self.assertEqual(packets[1].lparam, api.packets[-1].lparam)
 
     @unittest.skipUnless(os.name == 'nt', 'Windows retained-file behavior')
     def test_changed_ack_during_pin_is_refused(self):
