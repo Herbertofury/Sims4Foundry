@@ -15,6 +15,29 @@ from sims4foundry_cli.visual_probe import _pixels
 from sims4foundry_cli.wgc_recorder import WgcRecorder, _retain_unresolved
 from test_guarded_input import identity
 
+_UNRESOLVED_WINDOWS = []
+
+
+def _stop_or_retain(thread, stop, state, unresolved):
+    if any(item.get('hwnd') == state['window'] for item in unresolved):
+        _UNRESOLVED_WINDOWS.append((thread,stop,state))
+        return False
+    stop.set()
+    thread.join(timeout=5)
+    return not thread.is_alive() and state['destroyed'] and state['unregistered']
+
+
+class WgcFixtureOwnershipTests(unittest.TestCase):
+    def test_unresolved_child_retains_window_without_stop(self):
+        class Thread:
+            def join(self, **kwargs): raise AssertionError('Must not join retained owner')
+        class Stop:
+            def set(self): raise AssertionError('Must not stop retained window')
+        state = {'window':123,'destroyed':False,'unregistered':False}
+        self.assertFalse(_stop_or_retain(Thread(),Stop(),state,[{'hwnd':123}]))
+        self.assertIs(_UNRESOLVED_WINDOWS[-1][2],state)
+        _UNRESOLVED_WINDOWS.pop()
+
 
 @unittest.skipUnless(os.name == 'nt' and os.environ.get('FOUNDRY_WGC_TEST_FFMPEG')
                      and os.environ.get('FOUNDRY_WGC_TEST_SHA256'),
@@ -174,9 +197,11 @@ class WgcOwnedWindowTests(unittest.TestCase):
                     close_attempted=True
                     self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
             finally:
-                stop.set()
-                thread.join(timeout=5)
-                if thread.is_alive() or not done.is_set() or not state['destroyed'] or not state['unregistered']:
+                unresolved = []
+                if os.environ.get('FOUNDRY_WGC_TEE_PROBE') == '1':
+                    from wgc_tee_probe import _UNRESOLVED
+                    unresolved = _UNRESOLVED
+                if not _stop_or_retain(thread,stop,state,unresolved) or not done.is_set():
                     raise AssertionError('Owned capture window or thread cleanup is unresolved')
 
 

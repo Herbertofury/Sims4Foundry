@@ -24,6 +24,7 @@ def run_owned(test, hwnd, state, invalidate, ffmpeg, checksum):
     qpf.argtypes = [ctypes.POINTER(ctypes.c_longlong)]; qpf.restype = ctypes.c_int
     frequency = ctypes.c_longlong()
     test.assertTrue(qpf(ctypes.byref(frequency)))
+    test.assertGreater(frequency.value,0)
     def counter():
         value = ctypes.c_longlong()
         test.assertTrue(qpc(ctypes.byref(value)))
@@ -33,7 +34,7 @@ def run_owned(test, hwnd, state, invalidate, ffmpeg, checksum):
                '-vf','hwdownload,format=bgra','-t','2.5','-map','0:v','-c:v','png','-threads','1',
                '-fps_mode','passthrough','-enc_time_base','filter',
                '-f','tee','[f=image2pipe]pipe:1|[f=framehash:hash=sha256]pipe:2']
-    retained = {'pin':retained_capture_image(ffmpeg,checksum),'spawn_entered':False,'process':None}
+    retained = {'hwnd':hwnd,'pin':retained_capture_image(ffmpeg,checksum),'spawn_entered':False,'process':None}
     _UNRESOLVED.append(retained)
     retained['pin'].__enter__()
     retained['spawn_entered'] = True
@@ -79,6 +80,8 @@ def run_owned(test, hwnd, state, invalidate, ffmpeg, checksum):
     for packet in packets:
         test.assertIs(api.post(hwnd,packet),True)
     posted = counter()
+    test.assertGreater(marker,0)
+    test.assertGreater(posted,marker)
     for _ in range(12):
         time.sleep(.1)
         invalidate(hwnd,None,True)
@@ -96,6 +99,7 @@ def run_owned(test, hwnd, state, invalidate, ffmpeg, checksum):
     timebase = next(line.decode('ascii').split(':',1)[1].strip()
                     for line in lines if line.startswith(b'#tb'))
     scale = Fraction(timebase)
+    test.assertGreater(scale,0)
     rows = [line.decode('ascii').split(',') for line in lines if line and not line.startswith(b'#')]
     test.assertEqual(len(rows),len(frames))
     test.assertGreaterEqual(len(frames),2)
