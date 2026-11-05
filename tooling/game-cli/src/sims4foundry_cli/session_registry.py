@@ -120,7 +120,7 @@ class SessionRegistry:
         prior = [entry['event'] for entry in records[1:]]
         if kind == 'attempt':
             _require(set(event) == {'kind','request_id','operation','intent_sha256'}
-                     and event['operation'] in ('acquire', 'input', 'exit') and _hash(event['intent_sha256'])
+                     and event['operation'] in ('acquire', 'global_acquire', 'input', 'exit') and _hash(event['intent_sha256'])
                      and not any(item['request_id'] == event['request_id'] for item in prior)
                      and (not prior or prior[-1]['kind'] == 'resolved'),
                      'registry_pending', 'A previous request is unresolved or this request already exists.')
@@ -156,9 +156,9 @@ class SessionRegistry:
         _require(self._lock_owner is threading.current_thread(), 'registry_pending', 'Original registry lock is required.')
         records, previous = self._verify()
         _require(len(records) < MAX_RECORDS, 'registry_full', 'Registry record limit reached.')
-        if type(event) is dict and event.get('kind') == 'attempt' and event.get('operation') == 'acquire':
+        if type(event) is dict and event.get('kind') == 'attempt' and event.get('operation') in ('acquire','global_acquire'):
             _require(not any(record['event'].get('kind') == 'attempt'
-                             and record['event'].get('operation') == 'acquire' for record in records),
+                             and record['event'].get('operation') in ('acquire','global_acquire') for record in records),
                      'registry_pending', 'Original witness acquisition already exists; never acquire a replacement.')
         self._apply(records, event)
         self._directory.mkdir(exist_ok=True)

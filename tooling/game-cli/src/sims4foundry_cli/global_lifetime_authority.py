@@ -200,7 +200,7 @@ def claim_bound(registry, journal, witness):
             publication[0] = True
             witness._global_state = 'pending'
             registry._append_locked({'kind':'attempt','request_id':witness._request,
-                                     'operation':'acquire','intent_sha256':witness._intent})
+                                     'operation':'global_acquire','intent_sha256':witness._intent})
             reservation = claim(target,journal.session['session_id'],witness._request,binding)
             return BoundClaim(registry,journal,witness,reservation)
 
@@ -233,7 +233,7 @@ def acquire_bound(claim_ticket):
                     or events[0].get('journal_sha256') != binding
                     or canonical(events[0].get('lifetime')) != canonical(session_registry._lifetime(target))
                     or events[1].get('kind') != 'attempt'
-                    or events[1].get('operation') != 'acquire' or events[1].get('request_id') != witness._request
+                    or events[1].get('operation') != 'global_acquire' or events[1].get('request_id') != witness._request
                     or events[1].get('intent_sha256') != witness._intent):
                 raise FoundryError('global_witness_binding', 'Original witness acquisition is not the pending attempt.')
             reservation = inspect(target)

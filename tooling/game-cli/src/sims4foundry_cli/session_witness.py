@@ -47,8 +47,9 @@ class SessionWitness:
     def _resolution(self, status, *, allow_pending):
         self._check_status(status)
         events = self._registry.inspect()['events']
+        operation = 'global_acquire' if self._global_state == 'attached' else 'acquire'
         matches = [i for i,event in enumerate(events) if event.get('kind') == 'attempt'
-                   and event.get('operation') == 'acquire' and event.get('request_id') == self._request
+                   and event.get('operation') == operation and event.get('request_id') == self._request
                    and event.get('intent_sha256') == self._intent]
         if len(matches) != 1:
             raise FoundryError('witness_binding', 'Original acquisition intent is unavailable.')

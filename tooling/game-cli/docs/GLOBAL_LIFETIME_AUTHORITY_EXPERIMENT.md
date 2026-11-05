@@ -27,6 +27,9 @@ exact registry, journal and witness objects before witness acquisition.
 The witness's original owner thread excludes reentrant acquisition and recovery
 while that in-process claim is being published. The claim records the witness
 acquisition attempt in its registry before publishing the global reservation.
+That attempt uses a distinct `global_acquire` operation, so reconstructing a
+fresh witness wrapper over the same provider cannot resolve it as an ordinary
+acquisition or bypass an uncertain attachment.
 `acquire_bound` makes one provider acquisition, checks the original retained
 handle, publishes the attachment, and then resolves that same registry attempt
 while holding the original journal and registry locks. A failure can leave an

@@ -153,6 +153,9 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         self.assertFalse(result['atomic_snapshot'])
         self.assertFalse(result['game_qualified'])
         with witness.guard_for_dispatch(registry) as check_live: check_live()
+        self.assertEqual(process,witness.recover().snapshot())
+        replacement = SessionWitness(registry,provider,process,'2'*32)
+        with self.assertRaises(FoundryError): replacement.recover()
         with self.assertRaises(FoundryError): authority.acquire_bound(ticket)
         lease.close()
         with self.assertRaises(FoundryError): authority.acquire_bound(ticket)
@@ -347,6 +350,27 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         self.assertTrue(error.exception.details['no_replay'])
         self.assertEqual('global_attachment_observed',authority.inspect_attachment(identity())['outcome'])
         with self.assertRaises(FoundryError): authority.acquire_bound(ticket)
+        ticket._lease.close()
+
+    def test_reconstructed_wrapper_cannot_resolve_failed_global_attachment(self):
+        journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
+        (self.root/'registry').mkdir()
+        registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
+        registry.open_session('1'*32,registered_input.journal_binding(journal))
+        api = FakeWitnessApi()
+        provider = RetainedProcessRegistry(api,lambda view:True)
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        witness = SessionWitness(registry,provider,process,'2'*32)
+        ticket = authority.claim_bound(registry,journal,witness)
+        with mock.patch.object(authority,'new_json',side_effect=OSError('fixture attachment failed')):
+            with self.assertRaises(FoundryError): authority.acquire_bound(ticket)
+        self.assertEqual('global_acquire',registry.inspect()['events'][-1]['operation'])
+        replacement = SessionWitness(registry,provider,process,'2'*32)
+        with self.assertRaises(FoundryError): replacement.recover()
+        with self.assertRaises(FoundryError):
+            with replacement.guard_for_dispatch(registry): pass
+        self.assertEqual('attempt',registry.inspect()['events'][-1]['kind'])
+        self.assertEqual(1,api.opens)
         ticket._lease.close()
 
     def test_tampered_reservation_is_refused_without_replacement(self):
