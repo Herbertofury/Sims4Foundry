@@ -187,8 +187,12 @@ class SessionRegistry:
     def resolve(self, request_id, intent_sha256, receipt_sha256, outcome):
         _require(_token(request_id) and _hash(intent_sha256) and _hash(receipt_sha256)
                  and outcome in ('acknowledged','rejected'), 'registry_receipt', 'Exact original receipt binding is required.')
-        return self._append({'kind':'resolved','request_id':request_id,'intent_sha256':intent_sha256,
-                             'receipt_sha256':receipt_sha256,'outcome':outcome})
+        with self._hold_lock():
+            records,_ = self._verify()
+            _require(not records or records[-1]['event'].get('operation') != 'global_acquire',
+                     'registry_pending', 'Global acquisition can only resolve with its original bound attachment.')
+            return self._append_locked({'kind':'resolved','request_id':request_id,'intent_sha256':intent_sha256,
+                                        'receipt_sha256':receipt_sha256,'outcome':outcome})
 
     def inspect(self):
         with self._hold_lock():

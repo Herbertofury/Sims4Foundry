@@ -8,7 +8,7 @@ import os
 import re
 import sys
 
-from . import independent_live_owner, independent_session, input_journal, native_input, process_exit
+from . import global_lifetime_authority, independent_live_owner, independent_session, input_journal, native_input, process_exit
 from .errors import FoundryError
 from .io import canonical, external_path, loads, new_json
 from .retained_process_witness import RetainedProcessRegistry
@@ -39,6 +39,7 @@ def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream
     target = input_journal._target(intent['identity'])
     if target['pid'] != _fixture_pid():
         raise FoundryError('live_fixture_only', 'Only this test process may be selected by the fixture admission.')
+    global_lifetime_authority.status()
     identity = {key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
     marker = external_path(session)/'live-owner-intent.json'
     try:
@@ -48,17 +49,20 @@ def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream
         raise FoundryError('live_owner_unresolved', 'Original owner was already attempted; inspect without reacquiring.') from None
     # The marker is published before either an image pin or process handle is
     # acquired. Windows power-loss durability is not established.
-    retained = {'api':None,'image':None,'provider':None,'lease':None,'owner':None}
+    retained = {'api':None,'image':None,'provider':None,'ticket':None,'lease':None,'owner':None}
     _UNRESOLVED.append(retained)
     try:
         api = native_input._NativeApi()
         retained['api'] = api
-        retained['image'] = api.pin_image(target)
         selected = canonical(identity)
-        provider = RetainedProcessRegistry(process_exit._WindowsApi(),lambda view:canonical(view) == selected)
+        provider = RetainedProcessRegistry(process_exit._WindowsApi(),
+                                           lambda view:canonical(view) == selected and retained['image'] is not None)
         retained['provider'] = provider
         witness = SessionWitness(registry,provider,identity,witness_id)
-        lease = witness.acquire()
+        ticket = global_lifetime_authority.claim_bound(registry,journal,witness)
+        retained['ticket'] = ticket
+        retained['image'] = api.pin_image(target)
+        lease, attachment = global_lifetime_authority.acquire_bound(ticket)
         retained['lease'] = lease
         owner = independent_live_owner.LiveOwner(registry,journal,witness,ffmpeg,ffmpeg_sha256,
                                                 _fixture_admission=independent_live_owner._OWNED_FIXTURE_ADMISSION)
@@ -75,6 +79,7 @@ def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream
         sink.write(json.dumps(value,ensure_ascii=True,allow_nan=False,separators=(',',':'))+'\n')
         sink.flush()
     emit({'outcome':'experimental_owner_ready','session_id':intent['session_id'],'witness_id':witness_id,
+          'global_attachment_sha256':attachment['attachment_sha256'],
           'same_user_authenticated':False,'capture_time_verified':False,'game_qualified':False})
     stop_attempted = False
     while True:

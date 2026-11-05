@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from sims4foundry_cli import cli, independent_live_owner, independent_live_service, input_journal, live_input, native_input, process_exit, registered_input
+from sims4foundry_cli import cli, global_lifetime_authority, independent_live_owner, independent_live_service, input_journal, live_input, native_input, process_exit, registered_input
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.session_registry import SessionRegistry
 from test_guarded_input import identity
@@ -30,9 +30,12 @@ class LiveServiceTests(unittest.TestCase):
         self.registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
         self.registry.open_session('1'*32,registered_input.journal_binding(self.journal))
         self.api = FakeApi()
+        self.local = self.root/'fixture-local'
+        self.local.mkdir()
         original = {'identity':identity(),'session_id':'1'*32}
         for item in (mock.patch.object(independent_live_service.independent_session,'_open',
                                        return_value=(original,self.registry,self.journal,self.registry.inspect())),
+                     mock.patch.object(global_lifetime_authority,'_local_appdata',return_value=self.local),
                      mock.patch.object(independent_live_service,'_fixture_pid',return_value=identity()['pid']),
                      mock.patch.object(independent_live_owner,'_fixture_pid',return_value=identity()['pid']),
                      mock.patch.object(native_input,'_NativeApi',return_value=self.api),
@@ -43,6 +46,7 @@ class LiveServiceTests(unittest.TestCase):
                      mock.patch.object(live_input,'os',SimpleNamespace(name='nt'))):
             item.start()
             self.addCleanup(item.stop)
+        global_lifetime_authority.initialize()
 
     def run_service(self, commands, sink=None):
         raw = b''.join(json.dumps(command).encode()+b'\n' for command in commands)
@@ -146,6 +150,34 @@ class LiveServiceTests(unittest.TestCase):
             with self.assertRaises(FoundryError): self.run_service([])
             api.assert_not_called()
         independent_live_service._UNRESOLVED.remove(retained)
+
+    def test_second_workspace_cannot_open_same_lifetime(self):
+        with mock.patch.object(self.api,'pin_image',wraps=self.api.pin_image) as pin:
+            result, _ = self.run_service([])
+            self.assertEqual('owner_input_closed',result['outcome'])
+            self.assertEqual(1,pin.call_count)
+            first = independent_live_service._UNRESOLVED[-1]
+            second_session = self.root/'second-session'
+            second_session.mkdir()
+            second_journal = input_journal.InputJournal.create(self.root/'second-journal','5'*32,identity())
+            (self.root/'second-registry').mkdir()
+            second_registry = SessionRegistry(self.root/'second-registry',identity(),b'z'*32,FakeAnchor())
+            second_registry.open_session('5'*32,registered_input.journal_binding(second_journal))
+            original = {'identity':identity(),'session_id':'5'*32}
+            with mock.patch.object(independent_live_service.independent_session,'_open',
+                                   return_value=(original,second_registry,second_journal,second_registry.inspect())):
+                with self.assertRaises(FoundryError) as error:
+                    independent_live_service.serve(self.root/'other-authority',second_session,'6'*32,'ffmpeg.exe','a'*64,
+                        input_stream=io.BytesIO(),output_stream=io.StringIO(),
+                        _fixture_admission=independent_live_service._OWNED_FIXTURE_ADMISSION)
+            self.assertEqual('live_owner_start_unresolved',error.exception.code)
+            self.assertEqual(1,pin.call_count)
+            self.assertEqual('global_acquire',second_registry.inspect()['events'][-1]['operation'])
+            second = independent_live_service._UNRESOLVED[-1]
+            independent_live_service._UNRESOLVED.remove(second)
+            first['lease'].close()
+            first['api'].close(first['image'])
+            independent_live_service._UNRESOLVED.remove(first)
 
     def test_cli_requires_explicit_experimental_opt_in(self):
         output = io.StringIO()

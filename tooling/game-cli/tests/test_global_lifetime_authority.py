@@ -365,6 +365,8 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         with mock.patch.object(authority,'new_json',side_effect=OSError('fixture attachment failed')):
             with self.assertRaises(FoundryError): authority.acquire_bound(ticket)
         self.assertEqual('global_acquire',registry.inspect()['events'][-1]['operation'])
+        with self.assertRaises(FoundryError):
+            registry.resolve('2'*32,witness._intent,'b'*64,'acknowledged')
         replacement = SessionWitness(registry,provider,process,'2'*32)
         with self.assertRaises(FoundryError): replacement.recover()
         with self.assertRaises(FoundryError):

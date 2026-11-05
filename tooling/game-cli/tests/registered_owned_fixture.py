@@ -20,7 +20,7 @@ import time
 import uuid
 from unittest import mock
 
-from sims4foundry_cli import (guarded_input, independent_live_owner, independent_live_service, input_frame_evidence, input_journal, live_input, native_input, process_exit,
+from sims4foundry_cli import (global_lifetime_authority, guarded_input, independent_live_owner, independent_live_service, input_frame_evidence, input_journal, live_input, native_input, process_exit,
                               registered_input, session_registry, windows, windows_registry_key, wgc_recorder)
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Point, encode_click
@@ -113,8 +113,10 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                     {'op':'stop','abandon':True}]
                 source = io.BytesIO(b''.join(json.dumps(command).encode()+b'\n' for command in commands))
                 sink = io.StringIO()
-                with mock.patch.object(independent_live_service.independent_session,'_open',
-                                       return_value=(intent,registry,journal,registry.inspect())):
+                with (mock.patch.object(global_lifetime_authority,'_local_appdata',return_value=root/'fixture-local'),
+                      mock.patch.object(independent_live_service.independent_session,'_open',
+                                        return_value=(intent,registry,journal,registry.inspect()))):
+                    global_lifetime_authority.initialize()
                     result = independent_live_service.serve(root/'unused-authority',root,'2'*32,ffmpeg,ffmpeg_hash,
                                                             input_stream=source,output_stream=sink,
                                                             _fixture_admission=independent_live_service._OWNED_FIXTURE_ADMISSION)

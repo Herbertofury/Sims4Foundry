@@ -68,6 +68,10 @@ against the exact selected identity. The fixture retains an image pin and
 process witness; it does not start the game or prepare a profile. After its
 ready message, it accepts one JSON object per line, for example:
 
+The fixture uses a temporary OS-authority substitute to reserve and attach its
+original witness before sender setup. It does not create a real per-user
+authority or establish that older authorities are reconciled.
+
 ```json
 {"op":"status"}
 {"op":"click","request_id":"22222222222222222222222222222222","x":20,"y":30,"expectation":{"screen":"expected"},"evidence_directory":"C:\\FoundryEvidence\\new-frame"}
