@@ -4,6 +4,7 @@ from contextlib import contextmanager, redirect_stdout
 from copy import deepcopy
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -408,6 +409,26 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         with self.assertRaises(FoundryError): authority.inspect(identity())
         with self.assertRaises(FoundryError): self.claim('3'*32,'4'*32)
         self.assertEqual('{}',path.read_text())
+
+
+@unittest.skipUnless(os.name == 'nt', 'Windows DPAPI integration')
+class GlobalHistoryWindowsTests(unittest.TestCase):
+    def test_prior_session_inspection_uses_real_dpapi_and_sqlite_for_owned_fixture(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            old_authority,session = root/'old-authority',root/'session'
+            independent_session.initialize_authority(old_authority)
+            independent_session.initialize_session(old_authority,session,identity())
+            intent,registry,journal,_ = independent_session._open(old_authority,session)
+            process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+            witness = SessionWitness(registry,RetainedProcessRegistry(FakeWitnessApi(),lambda view:True),process,'2'*32)
+            lease = witness.acquire()
+            result = authority.inspect_prior_sessions(identity(),[{'authority':str(old_authority),'session':str(session)}])
+            self.assertFalse(result['pending_observed'])
+            self.assertTrue(result['sessions'][0]['witness_may_be_held'])
+            self.assertFalse(result['complete_history_verified'])
+            self.assertFalse(result['live_admission_authorized'])
+            lease.close()
 
 
 if __name__ == '__main__': unittest.main()
