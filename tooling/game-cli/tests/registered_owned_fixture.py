@@ -18,7 +18,7 @@ import time
 import uuid
 from unittest import mock
 
-from sims4foundry_cli import (guarded_input, input_frame_evidence, input_journal, live_input, native_input, process_exit,
+from sims4foundry_cli import (guarded_input, independent_live_owner, input_frame_evidence, input_journal, live_input, native_input, process_exit,
                               registered_input, session_registry, windows, windows_registry_key, wgc_recorder)
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Point, encode_click
@@ -95,46 +95,25 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
             closed = False
             try:
                 packets=encode_click(Point(20,30),ClientBounds(target['client_width'],target['client_height']))
-                with live_input.LiveInputBackend(target,packets,ffmpeg,ffmpeg_hash) as backend:
-                    before = backend._recorder.sample()
-                    region = (before.width//2,before.height//2,1,1)
-                    _, pixel = _pixels(before.png,region)
-                    test.assertTrue(all(value <= 10 for value in pixel[:3]))
-                    result=registered_input.execute_once(registry,journal,'3'*32,packets,backend,
-                                                         expected_observation={'fixture':'white'},witness=witness)
-                    test.assertEqual('awaiting_readback',result['state'])
-                    test.assertFalse(result['result']['semantic_success'])
+                if os.environ.get('FOUNDRY_WGC_LIVE_OWNER_TEST') == '1':
+                    owner = independent_live_owner.LiveOwner(registry,journal,witness,ffmpeg,ffmpeg_hash)
+                    result = owner.click_once('3'*32,20,30,expected_observation={'fixture':'white'},
+                                              evidence_directory=root/'frame-evidence')
+                    test.assertEqual('frame_recorded',result['outcome'])
+                    test.assertFalse(result['acknowledged'])
                     deadline=time.monotonic()+12
-                    changed=None
-                    while time.monotonic()<deadline:
-                        try:
-                            frame=backend._recorder.sample()
-                            if state['clicked'] and frame.sequence>before.sequence:
-                                _, pixel=_pixels(frame.png,region)
-                                if all(value>=245 for value in pixel[:3]):
-                                    changed=frame; break
-                        except FoundryError as error:
-                            if error.code!='recording_unavailable': raise
+                    while len(state['events']) < 2 and time.monotonic() < deadline:
                         time.sleep(.05)
-                    test.assertIsNotNone(changed,'No expected white fixture pixel was received')
-                    test.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],
-                                     state['events'])
-                    evidence=input_frame_evidence.capture(journal,'3'*32,backend,root/'frame-evidence')
-                    test.assertEqual('frame_recorded',evidence['outcome'])
-                    test.assertFalse(evidence['capture_time_verified'])
-                    test.assertFalse(evidence['acknowledged'])
+                    test.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],state['events'])
+                    test.assertEqual('awaiting_readback',journal.status('3'*32)['state'])
                     observed = input_frame_evidence.inspect(journal,'3'*32,root/'frame-evidence')
                     test.assertEqual('matching_files_observed',observed['state'])
-                    # Compare the frame with itself only to exercise the real
-                    # WGC PNG/decode path; this is not independent readback.
-                    image = root/'frame-evidence'/'frame.png'
-                    compared = input_frame_evidence.compare(
-                        journal,'3'*32,root/'frame-evidence',observed['frame_sha256'],
-                        observed['evidence_intent_sha256'],image,observed['frame_sha256'],
-                        (0,0,changed.width,changed.height))
-                    test.assertTrue(compared['matched'])
-                    test.assertFalse(compared['capture_time_verified'])
-                    test.assertFalse(compared['acknowledged'])
+                    with test.assertRaises(FoundryError):
+                        owner.click_once('3'*32,20,30,expected_observation={'fixture':'white'},
+                                         evidence_directory=root/'different-evidence')
+                    test.assertEqual(2,len(state['events']))
+                else:
+                    run_original(test,registry,journal,witness,packets,target,ffmpeg,ffmpeg_hash,state,root)
                 result=lease.close()
                 closed = result.get('outcome') == 'provider_reported_closed'
                 test.assertTrue(closed)
@@ -149,3 +128,41 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
         # The action remains awaiting readback; keep its original evidence even
         # on success, and preserve partial evidence on any uncertain failure.
         print('Owned fixture evidence directory name: ' + root.name,flush=True)
+
+
+def run_original(test,registry,journal,witness,packets,target,ffmpeg,ffmpeg_hash,state,root):
+    with live_input.LiveInputBackend(target,packets,ffmpeg,ffmpeg_hash) as backend:
+        before = backend._recorder.sample()
+        region = (before.width//2,before.height//2,1,1)
+        _, pixel = _pixels(before.png,region)
+        test.assertTrue(all(value <= 10 for value in pixel[:3]))
+        result=registered_input.execute_once(registry,journal,'3'*32,packets,backend,
+                                             expected_observation={'fixture':'white'},witness=witness)
+        test.assertEqual('awaiting_readback',result['state'])
+        test.assertFalse(result['result']['semantic_success'])
+        deadline=time.monotonic()+12
+        changed=None
+        while time.monotonic()<deadline:
+            try:
+                frame=backend._recorder.sample()
+                if state['clicked'] and frame.sequence>before.sequence:
+                    _, pixel=_pixels(frame.png,region)
+                    if all(value>=245 for value in pixel[:3]):
+                        changed=frame; break
+            except FoundryError as error:
+                if error.code!='recording_unavailable': raise
+            time.sleep(.05)
+        test.assertIsNotNone(changed,'No expected white fixture pixel was received')
+        test.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],state['events'])
+        evidence=input_frame_evidence.capture(journal,'3'*32,backend,root/'frame-evidence')
+        test.assertEqual('frame_recorded',evidence['outcome'])
+        test.assertFalse(evidence['capture_time_verified'])
+        test.assertFalse(evidence['acknowledged'])
+        observed = input_frame_evidence.inspect(journal,'3'*32,root/'frame-evidence')
+        test.assertEqual('matching_files_observed',observed['state'])
+        image = root/'frame-evidence'/'frame.png'
+        compared = input_frame_evidence.compare(journal,'3'*32,root/'frame-evidence',observed['frame_sha256'],
+                    observed['evidence_intent_sha256'],image,observed['frame_sha256'],(0,0,changed.width,changed.height))
+        test.assertTrue(compared['matched'])
+        test.assertFalse(compared['capture_time_verified'])
+        test.assertFalse(compared['acknowledged'])
