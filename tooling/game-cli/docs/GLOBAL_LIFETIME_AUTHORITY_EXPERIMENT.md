@@ -27,6 +27,10 @@ exact registry, journal and witness objects before witness acquisition.
 The witness's original owner thread excludes reentrant acquisition and recovery
 while that in-process claim is being published. This is not authentication
 against arbitrary same-user or in-process Python.
+The claim and attachment also hold the original journal lock and cooperating
+registry lock across their checks and publication; another witness using that
+same registry cannot begin an attempt during those steps. Other authorities,
+non-cooperating writers and path replacement are not excluded.
 `attach_witness` requires that original ticket and can subsequently publish an
 attachment to the matching held witness and its resolved acquisition. It samples the original provider guard
 but does not open a process. An existing attachment can be inspected after a

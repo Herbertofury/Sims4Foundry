@@ -142,7 +142,14 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         witness = SessionWitness(registry,provider,process,'2'*32)
         ticket = authority.claim_bound(registry,journal,witness)
         lease = witness.acquire()
-        result = authority.attach_witness(registry,journal,witness,ticket)
+        publish = authority.new_json
+        def try_input(path,row):
+            with self.assertRaises(FoundryError) as error:
+                registry.begin('3'*32,'input','b'*64)
+            self.assertEqual('busy',error.exception.code)
+            return publish(path,row)
+        with mock.patch.object(authority,'new_json',side_effect=try_input):
+            result = authority.attach_witness(registry,journal,witness,ticket)
         self.assertEqual('global_witness_attached',result['outcome'])
         self.assertFalse(result['atomic_snapshot'])
         self.assertFalse(result['game_qualified'])
@@ -172,11 +179,29 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         def reenter(path,row):
             with self.assertRaises(FoundryError) as error: witness.acquire()
             self.assertEqual('witness_busy',error.exception.code)
-            self.assertEqual(1,len(registry.inspect()['events']))
+            with self.assertRaises(FoundryError) as error: registry.inspect()
+            self.assertEqual('busy',error.exception.code)
             return publish(path,row)
         with mock.patch.object(authority,'new_json',side_effect=reenter):
             ticket = authority.claim_bound(registry,journal,witness)
         self.assertIs(ticket._witness,witness)
+        self.assertEqual(1,len(registry.inspect()['events']))
+
+    def test_claim_fences_different_witness_on_same_registry(self):
+        journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
+        (self.root/'registry').mkdir()
+        registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
+        registry.open_session('1'*32,registered_input.journal_binding(journal))
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        witness = SessionWitness(registry,RetainedProcessRegistry(FakeWitnessApi(),lambda view:True),process,'2'*32)
+        other = SessionWitness(registry,RetainedProcessRegistry(FakeWitnessApi(),lambda view:True),process,'3'*32)
+        publish = authority.new_json
+        def attempt_other(path,row):
+            with self.assertRaises(FoundryError) as error: other.acquire()
+            self.assertEqual('busy',error.exception.code)
+            return publish(path,row)
+        with mock.patch.object(authority,'new_json',side_effect=attempt_other):
+            authority.claim_bound(registry,journal,witness)
         self.assertEqual(1,len(registry.inspect()['events']))
 
     def test_wrong_witness_cannot_attach_to_reserved_session(self):

@@ -4,6 +4,7 @@ The anchor and key are trusted infrastructure, not supplied by this module.
 No process, profile, game, transport, key store or OS access is performed here.
 """
 from copy import deepcopy
+from contextlib import contextmanager
 import hashlib
 import hmac
 import re
@@ -173,3 +174,11 @@ class SessionRegistry:
             records, head = self._verify()
             return {'scope':self._scope, 'head':head if records else None,
                     'events':[deepcopy(item['event']) for item in records]}
+
+    @contextmanager
+    def _hold_events(self):
+        """Keep the cooperating registry lock held during a bounded host step."""
+        with lock(self._root / ('scope-' + self._scope + '.lock')):
+            records,head = self._verify()
+            yield {'scope':self._scope,'head':head if records else None,
+                   'events':[deepcopy(item['event']) for item in records]}
