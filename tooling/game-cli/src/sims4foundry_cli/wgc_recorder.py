@@ -34,7 +34,8 @@ def _retain_unresolved(recorder):
     # while child/worker cleanup is unresolved. It cannot prove handle state if
     # an earlier pin close itself failed.
     with _QUARANTINE_LOCK:
-        _QUARANTINE.add(recorder)
+        if recorder._state != "closed":
+            _QUARANTINE.add(recorder)
 
 
 def _release_resolved(recorder):

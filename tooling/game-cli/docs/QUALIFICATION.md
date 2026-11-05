@@ -27,7 +27,7 @@ Do not close the task merely because simulator or generic Windows CI passes.
 | Build object/mode observation | Uninstalled, separately admitted explicit-ID reader and transition-observation seam | Injected fabricated readers on current Python and actual Python 3.7 | No atomic/native/world-state proof |
 | Live queue observation contract | Pure bounded fixture validator, no native reader or action methods | Fabricated availability/identity/order/bounds tests | No |
 | Live queue reader seam | Uninstalled, separately admitted selected-actor observer with bounded queued/running iteration | Injected fabricated readers only | No native mode/identity/atomicity/completion proof |
-| No-Apex launch/entry/save/load/exit | Launch metadata preparation only | Synthetic EA metadata tests | No |
+| No-Apex launch/entry/save/load/exit | Launch and profile-lifecycle source plus gated normal-exit orchestration; no complete qualified flow | Synthetic EA, profile and exit fixtures | No |
 
 ## Required controlled validation
 

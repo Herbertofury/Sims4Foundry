@@ -311,6 +311,11 @@ class RecorderTests(unittest.TestCase):
             release.set()
             worker.join(timeout=1)
         self.assertTrue(self.recorder.close())
+    def test_completed_cleanup_cannot_be_requarantined(self):
+        self.assertTrue(self.recorder.close())
+        recorder._retain_unresolved(self.recorder)
+        with recorder._QUARANTINE_LOCK:
+            self.assertNotIn(self.recorder,recorder._QUARANTINE)
     def test_wrong_thread_does_not_start_helper(self):
         errors=[]
         def other():

@@ -383,6 +383,11 @@ class ExchangeScenarios:
     def records(self):
         return [json.loads(path.read_text()) for path in sorted((self.root / 'records').glob('*.json'))]
 
+    def error_details(self):
+        error = self.errors[-1] if self.errors else None
+        return 'fixture callback: type=%s code=%s errno=%s' % (
+            type(error).__name__, getattr(error, 'code', None), getattr(error, 'errno', None))
+
     def admit(self, message, ticket):
         self.admissions.append(self.records())
         return True
@@ -440,7 +445,8 @@ class ExchangeScenarios:
 
     def assert_receipt_only(self, fixture, expected_count=2):
         stats = fixture.stats()
-        self.assertEqual(['submit'] + ['receipt_read'] * (expected_count - 1), [m['kind'] for m in stats['messages']])
+        self.assertEqual(['submit'] + ['receipt_read'] * (expected_count - 1),
+                         [m['kind'] for m in stats['messages']], self.error_details())
         self.assertEqual(1, stats['submissions'])
         self.assertEqual(1, stats['executions'])
         self.assertTrue(stats['owner_only']); self.assertTrue(stats['worker_only'])
@@ -454,7 +460,10 @@ class ExchangeScenarios:
     def happy(self, ttl, rows):
         self.item = submission(ttl)
         fixture = self.fixture(rows=rows)
-        status = self.submit(fixture)
+        try:
+            status = self.submit(fixture)
+        except FoundryError as error:
+            raise AssertionError('Unexpected fixture submission failure: ' + self.error_details()) from error
         self.assertEqual('accepted', status.state)
         self.assertFalse(status.mutation)
         self.assertEqual(['intent'], [row['kind'] for row in self.admissions[0]])
@@ -467,7 +476,10 @@ class ExchangeScenarios:
         result = fixture.last_result
         count = fixture.stats()['reader_calls']
         for _ in range(2):
-            status = self.reconcile(fixture)
+            try:
+                status = self.reconcile(fixture)
+            except FoundryError as error:
+                raise AssertionError('Unexpected fixture reconciliation failure: ' + self.error_details()) from error
             self.assertEqual('adapter_returned', status.state)
             self.assertEqual('unverified', status.receipt.adapter_outcome)
             self.assertFalse(status.mutation)
@@ -591,7 +603,7 @@ class ExchangeScenarios:
         self.assertEqual([], stats['messages'])
         self.assertEqual(0, stats['submissions']); self.assertEqual(0, stats['reader_calls'])
         self.assertIsNone(fixture.tick())
-        if kind.startswith('auth_'): self.assertEqual(1, stats['auth_ready_fault'])
+        if kind.startswith('auth_'): self.assertEqual(1, stats['auth_ready_fault'], self.error_details())
         self.assertTrue(self.no_replay().uncertainty_latched)
         self.assertFalse(self.no_replay().mutation)
         fixture.close()
@@ -633,7 +645,7 @@ class AuthenticatedExchangeTests(ExchangeScenarios, unittest.TestCase):
         with self.assertRaises(FoundryError):
             self.journal.submit_once(self.item, authorize=self.admit, exchange=fail)
         self.assertFalse(self.no_replay().mutation)
-        self.assertEqual('unverified', fixture.tick())
+        self.assertEqual('unverified', fixture.tick(), self.error_details())
         self.assertEqual('adapter_returned', self.reconcile(fixture).state)
         self.assertEqual('unresolved_mutation', fixture.stats()['blocked'])
         forbidden = Mock(side_effect=AssertionError('Replacement mutation reached a callback'))
