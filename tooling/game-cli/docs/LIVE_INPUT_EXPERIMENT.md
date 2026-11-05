@@ -41,8 +41,13 @@ existing frame. The operation sends no input and does not acknowledge the
 journal; receipt time does not establish capture time, causality, semantic
 state or game qualification. A failed write or lost response may leave an
 intent, PNG or completed receipt; inspect the original output and do not repeat
-input. There is no dedicated evidence reconciliation command. Separate
-path-based hash and PNG reads do not exclude concurrent replacement.
+input. `input_frame_evidence.inspect` is a read-only Python API that inspects
+the original journal and evidence directory, reporting missing files or a
+matching set. It neither resolves the journal nor restores an incomplete
+sender binding; there is no CLI command or qualified recovery protocol yet.
+Its observations are not an atomic snapshot and do not authenticate files.
+The capture's separate path-based hash and PNG reads do not exclude concurrent
+replacement either.
 The parent is checked for named game/profile paths and existing reparse points
 before directory creation, but this path-based check does not prevent a
 concurrent replacement. Fixture records include local process and path details;

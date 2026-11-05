@@ -104,6 +104,10 @@ class InputFrameEvidenceTests(unittest.TestCase):
             self.assertFalse(result['acknowledged'])
             self.assertEqual(png(),(self.root/'evidence'/'frame.png').read_bytes())
             self.assertEqual('awaiting_readback',self.history.status('2'*32)['state'])
+            inspected = input_frame_evidence.inspect(self.history,'2'*32,self.root/'evidence')
+            self.assertEqual('matching_files_observed',inspected['state'])
+            self.assertFalse(inspected['atomic_snapshot'])
+            self.assertFalse(inspected['acknowledged'])
             with self.assertRaises(FoundryError):
                 input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
     def test_unknown_request_never_creates_evidence(self):
@@ -120,7 +124,50 @@ class InputFrameEvidenceTests(unittest.TestCase):
                     input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
         self.assertTrue((self.root/'evidence'/'evidence-intent.json').exists())
         self.assertFalse((self.root/'evidence'/'evidence-complete.json').exists())
+        before = sorted(path.name for path in (self.root/'evidence').iterdir())
+        inspected = input_frame_evidence.inspect(self.history,'2'*32,self.root/'evidence')
+        self.assertEqual('incomplete_or_unavailable',inspected['state'])
+        self.assertEqual([True,False,False],inspected['files_observed'])
+        self.assertEqual(before,sorted(path.name for path in (self.root/'evidence').iterdir()))
         self.assertEqual('awaiting_readback',self.history.status('2'*32)['state'])
+    def test_inspection_refuses_changed_frame_and_receipt(self):
+        with self.backend() as backend:
+            self.dispatch(backend)
+            input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+        frame = self.root/'evidence'/'frame.png'
+        original = frame.read_bytes()
+        frame.write_bytes(original+b'x')
+        with self.assertRaises(FoundryError):
+            input_frame_evidence.inspect(self.history,'2'*32,self.root/'evidence')
+        frame.write_bytes(original)
+        receipt = self.root/'evidence'/'evidence-complete.json'
+        receipt.write_text('{}',encoding='utf-8')
+        with self.assertRaises(FoundryError):
+            input_frame_evidence.inspect(self.history,'2'*32,self.root/'evidence')
+        self.assertEqual('awaiting_readback',self.history.status('2'*32)['state'])
+    def test_inspection_of_missing_directory_never_creates_it(self):
+        with self.backend() as backend:
+            self.dispatch(backend)
+        result = input_frame_evidence.inspect(self.history,'2'*32,self.root/'missing')
+        self.assertEqual('incomplete_or_unavailable',result['state'])
+        self.assertEqual([False,False,False],result['files_observed'])
+        self.assertFalse((self.root/'missing').exists())
+    def test_inspection_after_lost_completion_reply_does_not_repeat_input(self):
+        with self.backend() as backend:
+            self.dispatch(backend)
+            write = input_frame_evidence.new_json
+            def lose_reply(path, value):
+                write(path,value)
+                if path.name == 'evidence-complete.json':
+                    raise OSError('lost fixture reply')
+            with mock.patch.object(input_frame_evidence,'new_json',side_effect=lose_reply):
+                with self.assertRaises(OSError):
+                    input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+            posts = list(self.api.posts)
+            result = input_frame_evidence.inspect(self.history,'2'*32,self.root/'evidence')
+            self.assertEqual('matching_files_observed',result['state'])
+            self.assertEqual(posts,self.api.posts)
+            self.assertEqual('awaiting_readback',self.history.status('2'*32)['state'])
     def test_invalid_frame_is_refused_before_output(self):
         with self.backend() as backend:
             self.dispatch(backend)
