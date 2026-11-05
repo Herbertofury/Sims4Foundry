@@ -123,6 +123,18 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                     test.assertEqual('frame_recorded',evidence['outcome'])
                     test.assertFalse(evidence['capture_time_verified'])
                     test.assertFalse(evidence['acknowledged'])
+                    observed = input_frame_evidence.inspect(journal,'3'*32,root/'frame-evidence')
+                    test.assertEqual('matching_files_observed',observed['state'])
+                    # Compare the frame with itself only to exercise the real
+                    # WGC PNG/decode path; this is not independent readback.
+                    image = root/'frame-evidence'/'frame.png'
+                    compared = input_frame_evidence.compare(
+                        journal,'3'*32,root/'frame-evidence',observed['frame_sha256'],
+                        observed['evidence_intent_sha256'],image,observed['frame_sha256'],
+                        (0,0,changed.width,changed.height))
+                    test.assertTrue(compared['matched'])
+                    test.assertFalse(compared['capture_time_verified'])
+                    test.assertFalse(compared['acknowledged'])
                 result=lease.close()
                 closed = result.get('outcome') == 'provider_reported_closed'
                 test.assertTrue(closed)

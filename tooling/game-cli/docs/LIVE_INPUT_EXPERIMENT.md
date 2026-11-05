@@ -31,6 +31,9 @@ independent inspector only for the test's own PID, image and window; its key is
 DPAPI-protected and its SQLite anchor is cooperative. It leaves the journal
 awaiting readback and preserves the original fixture evidence directory; set
 `FOUNDRY_REGISTERED_FIXTURE_ROOT` to select its existing parent directory.
+The same fixture inspects the stored frame and decodes its pixels by comparing
+it with itself. That exercises the evidence path with a real WGC PNG; it is not
+an independent reference or game-state validation.
 `input_frame_evidence.capture` can store a validated frame from the backend
 instance used for the original registered input. The trusted in-process owner
 correlates the journal location, request, intent, packet plan, recorder object
