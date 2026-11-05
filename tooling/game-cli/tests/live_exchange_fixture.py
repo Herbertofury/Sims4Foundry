@@ -85,6 +85,7 @@ class FabricatedPolicy(transport.DenyHostPolicy):
         self.submissions, self.admissions, self.disk = [], [], []
         self.auth_stages = []
         self.auth_codes = []
+        self.auth_call_errors = []
 
     def note(self, collection, value):
         if len(collection) < 64:
@@ -174,6 +175,25 @@ class Fixture(object):
             return original_require(condition, code)
         self.trace_patch = patch.object(peer_auth, '_require', traced_require)
         self.trace_patch.start()
+        self.call_patches = []
+        def wrap_call(original, label):
+            def traced(*args, **kwargs):
+                try:
+                    return original(*args, **kwargs)
+                except peer_auth.PeerAuthError:
+                    self.policy.note(self.policy.auth_call_errors, label + '_auth')
+                    raise
+                except OSError:
+                    self.policy.note(self.policy.auth_call_errors, label + '_os')
+                    raise
+                except Exception:
+                    self.policy.note(self.policy.auth_call_errors, label + '_other')
+                    raise
+            return traced
+        for label in ('_context','_read','_send','_validate','_verify'):
+            item = patch.object(peer_auth, label, wrap_call(getattr(peer_auth,label),label[1:]))
+            item.start()
+            self.call_patches.append(item)
         self.original_auth_send = peer_auth._send
         self.auth_patch = (patch.object(peer_auth, '_send', self.auth_send)
                            if fault in ('auth_missing_ready', 'auth_invalid_ready') else None)
@@ -245,6 +265,7 @@ class Fixture(object):
         return dict(messages=deepcopy(self.server.messages),
                     auth_stages=list(self.policy.auth_stages),
                     auth_codes=list(self.policy.auth_codes),
+                    auth_call_errors=list(self.policy.auth_call_errors),
                     submissions=len(self.policy.submissions), executions=len(self.executions),
                     reader_calls=len(self.harness.calls), auth_ready_fault=self.auth_ready_fault,
                     owner_only=(all(thread is owner for _, thread in self.executions)
@@ -266,6 +287,8 @@ class Fixture(object):
                 self.patch.stop()
             if self.auth_patch:
                 self.auth_patch.stop()
+            for item in reversed(self.call_patches):
+                item.stop()
             self.trace_patch.stop()
         if not clean:
             raise AssertionError('Owned fixture transport failed to shut down.')

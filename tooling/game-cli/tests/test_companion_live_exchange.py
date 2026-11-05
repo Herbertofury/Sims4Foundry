@@ -401,8 +401,9 @@ class ExchangeScenarios:
         policy = getattr(self.last_fixture, 'policy', None)
         server = list(getattr(policy, 'auth_stages', []))[-16:] if policy is not None else []
         server_codes = list(getattr(policy, 'auth_codes', []))[-16:] if policy is not None else []
-        return 'fixture callback: kind=%s code=%s errno=%s client=%s server=%s server_codes=%s' % (
-            kind, code, number, self.client_auth_stages[-16:], server, server_codes)
+        calls = list(getattr(policy, 'auth_call_errors', []))[-16:] if policy is not None else []
+        return 'fixture callback: kind=%s code=%s errno=%s client=%s server=%s server_codes=%s calls=%s' % (
+            kind, code, number, self.client_auth_stages[-16:], server, server_codes, calls)
 
     def admit(self, message, ticket):
         self.admissions.append(self.records())
