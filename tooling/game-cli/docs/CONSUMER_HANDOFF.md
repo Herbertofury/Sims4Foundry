@@ -190,8 +190,10 @@ denied, and a returned adapter claim is not independent evidence.
   save/reload/exit workflow independent of Apex.
 - A single current CAS UI owner integrated with existing preservation rules;
   complete neutral CAS controls and non-Apex input qualification.
-- Build placement/edit/remove/undo semantics. The standalone Build observer is
-  an injected read seam, not a Build controller or transition command.
+- Qualified Build purchase/placement/edit/remove/undo semantics. Source includes
+  injected direct-create, transform, destroy and variant executors, plus an
+  authenticated transform route, but they do not establish catalog purchase,
+  transaction/undo behavior, or current-game compatibility.
 - Current-game validation for wheel/drag/text and full Live interaction actions.
 - Completion of the earlier final independent owner/transport re-review. The
   separate host-sender review does not replace that incomplete assessment.
