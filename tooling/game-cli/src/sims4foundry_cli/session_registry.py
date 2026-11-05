@@ -107,7 +107,7 @@ class SessionRegistry:
         prior = [entry['event'] for entry in records[1:]]
         if kind == 'attempt':
             _require(set(event) == {'kind','request_id','operation','intent_sha256'}
-                     and event['operation'] in ('input', 'exit') and _hash(event['intent_sha256'])
+                     and event['operation'] in ('acquire', 'input', 'exit') and _hash(event['intent_sha256'])
                      and not any(item['request_id'] == event['request_id'] for item in prior)
                      and (not prior or prior[-1]['kind'] == 'resolved'),
                      'registry_pending', 'A previous request is unresolved or this request already exists.')
@@ -158,7 +158,7 @@ class SessionRegistry:
                              'lifetime':deepcopy(self._lifetime)})
 
     def begin(self, request_id, operation, intent_sha256):
-        _require(_token(request_id) and operation in ('input','exit') and _hash(intent_sha256),
+        _require(_token(request_id) and operation in ('acquire','input','exit') and _hash(intent_sha256),
                  'registry_request', 'Exact request, operation and intent are required.')
         return self._append({'kind':'attempt','request_id':request_id,'operation':operation,'intent_sha256':intent_sha256})
 

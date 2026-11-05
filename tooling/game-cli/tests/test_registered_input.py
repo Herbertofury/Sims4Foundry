@@ -1,6 +1,6 @@
 """Shared registry/journal integration with synthetic providers only."""
 from pathlib import Path
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import json
 import os
 import tempfile
@@ -110,6 +110,35 @@ class RegisteredInputTests(unittest.TestCase):
         with mock.patch.object(self.registry, 'resolve', side_effect=while_pinned):
             registered_input.reconcile_acknowledged(self.registry,self.journal,'2'*32)
         self.assertEqual('resolved', self.registry.inspect()['events'][-1]['kind'])
+
+    def test_lost_cleanup_ack_reconciles_existing_resolution_without_replay(self):
+        self.execute()
+        self.journal.acknowledge('2'*32, lambda view,target,expected:
+                                 dict(view,evidence_sha256='a'*64,observation=expected))
+        original = registered_input._retain_record
+        @contextmanager
+        def fail_cleanup(path, checksum):
+            with original(path, checksum):
+                yield
+            if path.name == 'ack.json': raise OSError('lost cleanup acknowledgement')
+        with mock.patch.object(registered_input, '_retain_record', side_effect=fail_cleanup):
+            with self.assertRaises(OSError):
+                registered_input.reconcile_acknowledged(self.registry,self.journal,'2'*32)
+        count = len(self.registry.inspect()['events'])
+        result = registered_input.reconcile_acknowledged(self.registry,self.journal,'2'*32)
+        self.assertTrue(result['reconciled_existing'])
+        self.assertEqual(count, len(self.registry.inspect()['events']))
+        self.assertEqual(2, len(self.backend.posts))
+
+    def test_evidence_handle_bound_is_checked_before_pinning(self):
+        self.execute()
+        self.journal.acknowledge('2'*32, lambda view,target,expected:
+                                 dict(view,evidence_sha256='a'*64,observation=expected))
+        with mock.patch.object(registered_input, 'MAX_RECONCILE_HANDLES', 0):
+            with self.assertRaises(FoundryError) as error:
+                registered_input.reconcile_acknowledged(self.registry,self.journal,'2'*32)
+        self.assertEqual('registry_bound', error.exception.code)
+        self.assertEqual('attempt', self.registry.inspect()['events'][-1]['kind'])
 
 
 if __name__ == '__main__': unittest.main()

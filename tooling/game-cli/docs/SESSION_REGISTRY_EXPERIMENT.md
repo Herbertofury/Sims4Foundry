@@ -19,6 +19,12 @@ acknowledgement reconciliation pins each validated record and its ancestor path
 through the registry update and repeats full journal validation under those
 pins. This does not prevent the creation of new files in a pinned directory or
 protect other lifecycle stages against same-path replacement.
+The total number of retained file and directory handles is bounded. If the
+registry update succeeded but cleanup acknowledgement was lost, the same
+original receipt can be checked against the already anchored resolution
+without sending input or appending another resolution. An entry inserted after
+the last directory check remains an unresolved race; this path is not qualified
+for production authority.
 
 The key, anchor and common registry directory are supplied by the hosting
 authority. The module does not create or authenticate that authority, store a
@@ -36,6 +42,13 @@ did not advance remain required. No command enables game input from this
 registry. Its tests use synthetic process identities and files outside the game
 and profile; they are not live-game qualification.
 
+`session_witness` records an acquisition intent before calling the retained
+process owner, and reconciles a lost caller reply only by recovering that same
+owner's existing witness. A lost raw handle remains pending. An already
+anchored acquisition can be checked without a second open or resolution. This
+binds provider assertions; it does not add client authentication,
+loaded-image proof, restart recovery, slot retirement or atomic UI dispatch.
+
 `SQLiteAnchor` supplies an explicit local database with full-synchronous
 SQLite transactions and cross-process compare-and-swap for cooperative
 experiments. It can detect a removed chain tail while its head is intact, but
@@ -50,3 +63,5 @@ protects key material at rest from other accounts under ordinary DPAPI policy;
 it does not authenticate other programs running as the same user, prevent key
 file replacement, ensure secure memory, or make the SQLite anchor rollback
 resistant. Treat the key, authority and anchor as experimental together.
+If key creation's acknowledgement is lost, the original file must be inspected
+and reopened for its original scope; creation refuses to replace it.
