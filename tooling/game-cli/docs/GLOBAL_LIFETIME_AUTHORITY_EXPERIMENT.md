@@ -22,8 +22,10 @@ An initialized authority or a missing/inaccessible reservation does not prove
 that an earlier independent authority sent no input. The lower-level
 reservation API accepts caller-supplied binding data; `claim_session` first
 reopens an existing unused session and binds its original journal and registry.
-`attach_witness` can subsequently publish an attachment to the matching held
-witness and its resolved acquisition. It samples the original provider guard
+`claim_bound` instead returns a non-serializable in-process ticket tied to the
+exact registry, journal and witness objects before witness acquisition.
+`attach_witness` requires that original ticket and can subsequently publish an
+attachment to the matching held witness and its resolved acquisition. It samples the original provider guard
 but does not open a process. An existing attachment can be inspected after a
 lost reply; this does not prove the witness is still held or the gate is free.
 The registry, journal and global reservation are not an atomic snapshot.

@@ -152,7 +152,35 @@ def claim_session(authority, session, witness_id):
     return claim(intent['identity'],intent['session_id'],witness_id,binding)
 
 
-def attach_witness(registry, journal, witness):
+class BoundClaim:
+    """In-memory correlation to the exact owner objects; not restart recovery."""
+    def __init__(self, registry, journal, witness, reservation):
+        self._registry, self._journal, self._witness = registry, journal, witness
+        self._reservation, self._attachment_attempted = reservation, False
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError('A bound claim cannot be serialized or transferred.')
+
+
+def claim_bound(registry, journal, witness):
+    """Reserve for the exact in-process owner objects before witness acquisition."""
+    from . import registered_input
+    from .session_registry import SessionRegistry
+    from .session_witness import SessionWitness
+    if (type(registry) is not SessionRegistry or type(journal) is not input_journal.InputJournal
+            or type(witness) is not SessionWitness or witness._registry is not registry):
+        raise FoundryError('global_witness_binding', 'Original registry, journal and witness are required.')
+    target = input_journal._target(journal.session['target'])
+    identity = {key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+    events = registered_input._check(registry,journal)
+    if (canonical(witness._identity) != canonical(identity) or len(events) != 1
+            or events[0].get('kind') != 'session' or journal._runs()):
+        raise FoundryError('global_session_unresolved', 'An unused matching owner and session are required.')
+    reservation = claim(target,journal.session['session_id'],witness._request,registered_input.journal_binding(journal))
+    return BoundClaim(registry,journal,witness,reservation)
+
+
+def attach_witness(registry, journal, witness, claim_ticket):
     """Bind an already-held original witness to its existing reservation.
 
     No process is opened and no input is sent. The guard samples the retained
@@ -162,7 +190,10 @@ def attach_witness(registry, journal, witness):
     from .session_registry import SessionRegistry
     from .session_witness import SessionWitness
     if (type(registry) is not SessionRegistry or type(journal) is not input_journal.InputJournal
-            or type(witness) is not SessionWitness or witness._registry is not registry):
+            or type(witness) is not SessionWitness or witness._registry is not registry
+            or type(claim_ticket) is not BoundClaim or claim_ticket._registry is not registry
+            or claim_ticket._journal is not journal or claim_ticket._witness is not witness
+            or claim_ticket._attachment_attempted):
         raise FoundryError('global_witness_binding', 'Original registry, journal and witness are required.')
     target = input_journal._target(journal.session['target'])
     identity = {key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
@@ -180,7 +211,8 @@ def attach_witness(registry, journal, witness):
         reservation = inspect(target)
         binding = registered_input.journal_binding(journal)
         if (reservation['session_id'] != journal.session['session_id']
-                or reservation['witness_id'] != witness._request or reservation['journal_sha256'] != binding):
+                or reservation['witness_id'] != witness._request or reservation['journal_sha256'] != binding
+                or reservation['reservation_sha256'] != claim_ticket._reservation['reservation_sha256']):
             raise FoundryError('global_witness_binding', 'Original reservation differs from this witness and journal.')
         root,authority_id = _authority()
         row = {'schema':1,'authority_id':authority_id,'scope':reservation['scope'],
@@ -188,6 +220,7 @@ def attach_witness(registry, journal, witness):
                'witness_id':witness._request,'acquisition_intent_sha256':witness._intent,
                'registry_resolution_sha256':digest(events[-1])}
         check_live()
+        claim_ticket._attachment_attempted = True
         try:
             new_json(root/'lifetimes'/(reservation['scope']+'.attached.json'),row)
         except FileExistsError:
