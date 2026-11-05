@@ -12,15 +12,13 @@ from ctypes import wintypes as wt
 import hashlib
 import os
 from pathlib import Path
-import secrets
-import shutil
 import sys
 import tempfile
 import time
 from unittest import mock
 
 from sims4foundry_cli import (guarded_input, input_journal, live_input, native_input, process_exit,
-                              registered_input, session_registry, windows, wgc_recorder)
+                              registered_input, session_registry, windows, windows_registry_key, wgc_recorder)
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Point, encode_click
 from sims4foundry_cli.io import digest
@@ -62,10 +60,9 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
         test.assertEqual((target['pid'],target['executable'],target['executable_sha256'],target['hwnd']),
                          (pid_value,str(path),digest_value,hwnd_value))
         return dict(deepcopy(target),observed_at=time.time())
-    base = Path(tempfile.gettempdir()).resolve()
-    root = Path(tempfile.mkdtemp(prefix='foundry-owned-registered-')).resolve()
+    base = Path(os.environ.get('FOUNDRY_REGISTERED_FIXTURE_ROOT',tempfile.gettempdir())).resolve(strict=True)
+    root = Path(tempfile.mkdtemp(prefix='foundry-owned-registered-',dir=str(base))).resolve()
     test.assertEqual(base,root.parent)
-    succeeded = False
     try:
         with ExitStack() as stack:
             for module in (windows,input_journal,session_registry,guarded_input,wgc_recorder):
@@ -74,7 +71,8 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
             journal = input_journal.InputJournal.create(root/'journal','1'*32,target)
             registry_dir = root/'registry'; registry_dir.mkdir()
             anchor = SQLiteAnchor.create(root/'anchor.sqlite')
-            registry = session_registry.SessionRegistry(registry_dir,target,secrets.token_bytes(32),anchor)
+            key = windows_registry_key.create_key(root/'registry-key.json',digest(session_registry._lifetime(target)))
+            registry = session_registry.SessionRegistry(registry_dir,target,key,anchor)
             registry.open_session('1'*32,registered_input.journal_binding(journal))
             provider = RetainedProcessRegistry(process_api,lambda view:True)
             process_identity={key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
@@ -118,12 +116,7 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                 # An uncertain witness close is never retried.
                 if not closed:
                     pass
-        succeeded = True
     finally:
-        # Preserve the original fixture journal if any step was uncertain.
-        if succeeded:
-            resolved = root.resolve(strict=True)
-            if (resolved != root or resolved.parent != base or root.is_symlink()
-                    or not root.name.startswith('foundry-owned-registered-')):
-                raise AssertionError('Owned fixture path changed; retained for inspection')
-            shutil.rmtree(root)
+        # The action remains awaiting readback; keep its original evidence even
+        # on success, and preserve partial evidence on any uncertain failure.
+        print('Owned fixture evidence retained at: ' + str(root),flush=True)

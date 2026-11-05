@@ -28,8 +28,10 @@ With `FOUNDRY_WGC_REGISTERED_TEST=1`, the opt-in owned-window test additionally
 exercises the registry, retained witness, journal, live sender and real WGC
 stream together. It substitutes the Sims-specific identity validator and
 independent inspector only for the test's own PID, image and window; its key is
-in memory and its SQLite anchor is cooperative. It leaves the journal awaiting
-readback. It does not qualify an unpatched Sims identity, game action, frame
+DPAPI-protected and its SQLite anchor is cooperative. It leaves the journal
+awaiting readback and preserves the original fixture evidence directory; set
+`FOUNDRY_REGISTERED_FIXTURE_ROOT` to select its existing parent directory.
+It does not qualify an unpatched Sims identity, game action, frame
 capture time or authenticated semantic observation.
 Recorder startup with an unknown child-creation outcome and unsuccessful
 cleanup retain the recorder and pin objects in an in-process quarantine. If a
