@@ -14,12 +14,12 @@ from test_session_registry import FakeAnchor
 
 
 class FakeApi:
-    def __init__(self): self.opens = 0
+    def __init__(self): self.opens = 0; self.state = WAIT_TIMEOUT
     def open(self, pid): self.opens += 1; return 'fixture-handle'
     def identity(self, handle):
         value = identity()
         return value['executable'], value['creation_filetime']
-    def wait(self, handle, timeout): return WAIT_TIMEOUT
+    def wait(self, handle, timeout): return self.state
     def close(self, handle): pass
 
 
@@ -71,6 +71,16 @@ class SessionWitnessTests(unittest.TestCase):
         self.assertEqual(3, self.anchor.cas_calls)
         self.assertEqual(self.process, self.witness.recover().snapshot())
         self.assertEqual(3, self.anchor.cas_calls)
+        self.assertEqual(1, self.api.opens)
+    def test_reentrant_provider_access_is_refused_during_resolution(self):
+        original = self.anchor.compare_and_swap
+        def attempt_reentry(*args):
+            if self.api.opens:
+                with self.assertRaises(FoundryError):
+                    self.provider.recover('2'*32, self.process)
+            return original(*args)
+        with mock.patch.object(self.anchor, 'compare_and_swap', side_effect=attempt_reentry):
+            self.assertTrue(self.witness.acquire().is_running())
         self.assertEqual(1, self.api.opens)
     def test_foreign_lifetime_cannot_be_bound(self):
         foreign = dict(self.process, creation_filetime=self.process['creation_filetime']+1)

@@ -1,5 +1,6 @@
 """Experimental binding between the shared ledger and retained witness owner."""
 from copy import deepcopy
+from contextlib import contextmanager
 
 from .errors import FoundryError
 from .io import canonical, digest
@@ -30,8 +31,7 @@ class SessionWitness:
         self._intent = digest({'schema':1, 'scope':state['scope'], 'request_id':request_id,
                                'identity':self._identity, 'operation':'acquire'})
 
-    def _status(self):
-        status = self._provider.status(self._request)
+    def _check_status(self, status):
         if (type(status) is not dict or status.get('request_id') != self._request
                 or status.get('state') != 'held' or canonical(status.get('identity')) != canonical(self._identity)
                 or status.get('os_handle_exported') is not False
@@ -41,8 +41,8 @@ class SessionWitness:
             raise FoundryError('witness_unresolved', 'Original provider witness is not confirmed held.')
         return status
 
-    def _complete(self):
-        status = self._status()
+    def _resolution(self, status, *, allow_pending):
+        self._check_status(status)
         events = self._registry.inspect()['events']
         matches = [i for i,event in enumerate(events) if event.get('kind') == 'attempt'
                    and event.get('operation') == 'acquire' and event.get('request_id') == self._request
@@ -50,8 +50,10 @@ class SessionWitness:
         if len(matches) != 1:
             raise FoundryError('witness_binding', 'Original acquisition intent is unavailable.')
         index = matches[0]
-        if index + 1 == len(events):
+        if index + 1 == len(events) and allow_pending:
             self._registry.resolve(self._request, self._intent, digest(status), 'acknowledged')
+        elif index + 1 == len(events):
+            raise FoundryError('witness_unresolved', 'Original acquisition has not been anchored.')
         else:
             recorded = events[index+1]
             if (recorded.get('kind') != 'resolved' or recorded.get('request_id') != self._request
@@ -59,6 +61,21 @@ class SessionWitness:
                     or recorded.get('receipt_sha256') != digest(status)
                     or recorded.get('outcome') != 'acknowledged'):
                 raise FoundryError('witness_unresolved', 'Original acquisition resolution differs from the witness.')
+
+    def _complete(self):
+        with self._provider.guard_held(self._request, self._identity) as (status, check_live):
+            check_live()
+            self._resolution(status, allow_pending=True)
+
+    @contextmanager
+    def guard_for_dispatch(self, registry):
+        """Hold the original provider and check live identity before dispatch."""
+        if registry is not self._registry:
+            raise FoundryError('witness_binding', 'Dispatch must use the original registry authority.')
+        with self._provider.guard_held(self._request, self._identity) as (status, check_live):
+            self._resolution(status, allow_pending=False)
+            check_live()
+            yield check_live
 
     def acquire(self):
         self._registry.begin(self._request, 'acquire', self._intent)

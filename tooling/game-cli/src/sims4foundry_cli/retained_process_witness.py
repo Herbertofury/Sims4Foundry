@@ -184,9 +184,39 @@ class RetainedProcessRegistry:
     def status(self, token):
         with self._entered():
             slot = self._slot(token)
-            return {'request_id': token, 'state': slot['state'], 'identity': deepcopy(slot['identity']),
-                    'os_handle_exported': False, 'os_release_verified': False,
-                    'loaded_image_hash_verified': False, 'game_qualified': False, 'authenticated': False}
+            return self._status_record(token, slot)
+
+    def _status_record(self, token, slot):
+        return {'request_id': token, 'state': slot['state'], 'identity': deepcopy(slot['identity']),
+                'os_handle_exported': False, 'os_release_verified': False,
+                'loaded_image_hash_verified': False, 'game_qualified': False, 'authenticated': False}
+
+    @contextmanager
+    def guard_held(self, token, identity):
+        """Hold provider ownership and sample the original handle's liveness.
+
+        Prevents reentrant provider close/recovery during the caller's guarded
+        operation. The target can still exit independently at any time.
+        """
+        with self._entered():
+            slot = self._held(token)
+            if canonical(_identity(identity)) != canonical(slot['identity']):
+                raise FoundryError('process_witness_mismatch', 'Guard identity differs from the original witness.')
+            active = True
+            def check_live():
+                if not active or threading.current_thread() is not self._owner:
+                    raise FoundryError('process_owner_changed', 'The original witness guard is not held.')
+                self._check_handle(slot)
+                running = self._api.wait(slot['handle'], 0)
+                if type(running) is not int or running != WAIT_TIMEOUT:
+                    raise FoundryError('process_lifetime_unresolved', 'Original handle is not confirmed running.')
+                self._check_handle(slot)
+                return True
+            check_live()
+            try:
+                yield self._status_record(token, slot), check_live
+            finally:
+                active = False
 
     def _snapshot(self, token):
         with self._entered():

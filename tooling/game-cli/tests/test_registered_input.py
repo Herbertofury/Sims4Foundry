@@ -12,9 +12,13 @@ from sims4foundry_cli import input_journal, live_input, registered_input
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import Point, ClientBounds, encode_click
 from sims4foundry_cli.session_registry import SessionRegistry
+from sims4foundry_cli.session_witness import SessionWitness
+from sims4foundry_cli.retained_process_witness import RetainedProcessRegistry
+from sims4foundry_cli.process_exit import WAIT_OBJECT_0
 from test_guarded_input import FakeBackend, identity
 from test_session_registry import FakeAnchor
 from test_live_input import FakeApi, FakeLease, FakeRecorder
+from test_session_witness import FakeApi as FakeWitnessApi
 
 
 class RegisteredInputTests(unittest.TestCase):
@@ -27,6 +31,11 @@ class RegisteredInputTests(unittest.TestCase):
         self.anchor = FakeAnchor()
         self.registry = SessionRegistry(root/'registry', identity(), b'k'*32, self.anchor)
         self.registry.open_session('1'*32, registered_input.journal_binding(self.journal))
+        self.witness_api = FakeWitnessApi()
+        self.provider = RetainedProcessRegistry(self.witness_api, lambda view: True)
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        self.witness = SessionWitness(self.registry, self.provider, process, '4'*32)
+        self.lease = self.witness.acquire()
         self.backend = FakeBackend()
         self.packets = encode_click(Point(20,30), ClientBounds(500,500))
         if os.name != 'nt':
@@ -36,7 +45,7 @@ class RegisteredInputTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
     def execute(self):
         return registered_input.execute_once(self.registry,self.journal,'2'*32,self.packets,self.backend,
-                                             expected_observation={'mode':'cas'})
+                                             expected_observation={'mode':'cas'},witness=self.witness)
     def test_shared_gate_holds_until_original_host_acknowledgement(self):
         self.assertEqual('awaiting_readback', self.execute()['state'])
         with self.assertRaises(FoundryError): self.registry.begin('3'*32, 'exit', 'c'*64)
@@ -57,12 +66,32 @@ class RegisteredInputTests(unittest.TestCase):
             with self.assertRaises(OSError): self.execute()
         with self.assertRaises(FoundryError): self.registry.begin('3'*32, 'exit', 'c'*64)
         self.assertEqual([], self.backend.posts)
+    def test_reentrant_close_during_registry_callback_is_refused(self):
+        original = self.anchor.compare_and_swap
+        def try_close(*args):
+            with self.assertRaises(FoundryError): self.lease.close()
+            return original(*args)
+        with mock.patch.object(self.anchor, 'compare_and_swap', side_effect=try_close):
+            self.assertEqual('awaiting_readback', self.execute()['state'])
+        self.assertEqual(2, len(self.backend.posts))
+    def test_process_exit_before_packet_prevents_dispatch(self):
+        def terminate_before_post(packet):
+            self.witness_api.state = WAIT_OBJECT_0
+            return True
+        self.backend.verify_input_context = terminate_before_post
+        result = self.execute()
+        self.assertEqual('unresolved', result['state'])
+        self.assertEqual([], self.backend.posts)
+    def test_closed_witness_blocks_dispatch_even_after_anchored_acquisition(self):
+        self.lease.close()
+        with self.assertRaises(FoundryError): self.execute()
+        self.assertEqual([], self.backend.posts)
     def test_wrong_journal_binding_never_dispatches(self):
         # The same session metadata in a different directory is still foreign.
         other = input_journal.InputJournal.create(Path(self.temp.name)/'other', '1'*32, identity())
         with self.assertRaises(FoundryError):
             registered_input.execute_once(self.registry,other,'2'*32,self.packets,self.backend,
-                                          expected_observation={'mode':'cas'})
+                                          expected_observation={'mode':'cas'},witness=self.witness)
         self.assertEqual([], self.backend.posts)
     def test_registry_journal_and_native_adapter_join_in_one_owned_context(self):
         api = FakeApi()
@@ -72,7 +101,7 @@ class RegisteredInputTests(unittest.TestCase):
               mock.patch.object(live_input, 'os', SimpleNamespace(name='nt'))):
             with live_input.LiveInputBackend(identity(),self.packets,'ffmpeg.exe','a'*64) as backend:
                 result = registered_input.execute_once(self.registry,self.journal,'2'*32,self.packets,backend,
-                                                       expected_observation={'mode':'cas'})
+                                                       expected_observation={'mode':'cas'},witness=self.witness)
                 self.assertEqual('awaiting_readback', result['state'])
                 self.assertFalse(result['result']['semantic_success'])
         self.assertEqual(2, len(api.posts))

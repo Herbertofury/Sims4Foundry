@@ -10,6 +10,7 @@ from . import capture_pin, companion_build, input_journal
 from .errors import FoundryError
 from .io import canonical, digest, lock
 from .session_registry import SessionRegistry, _lifetime
+from .session_witness import SessionWitness
 
 MAX_RECONCILE_HANDLES = 512
 
@@ -41,8 +42,18 @@ def _check(registry, journal):
     return events
 
 
-def execute_once(registry, journal, request_id, packets, backend, *, expected_observation):
-    """Persist a shared attempt before the journal is allowed to dispatch."""
+class _WitnessBoundBackend:
+    def __init__(self, backend, check_live):
+        self._backend, self._check_live = backend, check_live
+    def __getattr__(self, name):
+        return getattr(self._backend, name)
+    def post(self, hwnd, packet):
+        self._check_live()
+        return self._backend.post(hwnd, packet)
+
+
+def execute_once(registry, journal, request_id, packets, backend, *, expected_observation, witness):
+    """Persist a shared attempt and retain the original live witness during dispatch."""
     _check(registry, journal)
     if not input_journal._token(request_id):
         raise FoundryError('invalid_request', 'An exact request ID is required.')
@@ -52,10 +63,14 @@ def execute_once(registry, journal, request_id, packets, backend, *, expected_ob
     intent = {'schema':1, 'request_id':request_id, 'session_id':journal.session['session_id'],
               'target':target, 'packets':wire, 'expectation':expectation}
     expected_hash = digest(intent)
-    registry.begin(request_id, 'input', expected_hash)
-    # Any failure, including one before native dispatch, leaves the shared gate
-    # unresolved. Never repeat this request or infer non-delivery.
-    result = journal.execute_once(request_id, packets, backend, expected_observation=expectation)
+    if type(witness) is not SessionWitness:
+        raise FoundryError('witness_binding', 'The original retained session witness is required.')
+    with witness.guard_for_dispatch(registry) as check_live:
+        registry.begin(request_id, 'input', expected_hash)
+        # Any failure, including one before native dispatch, leaves the shared
+        # gate unresolved. A fresh handle check immediately precedes each post.
+        result = journal.execute_once(request_id, packets, _WitnessBoundBackend(backend, check_live),
+                                      expected_observation=expectation)
     if result.get('intent_sha256') != expected_hash:
         raise FoundryError('registry_binding', 'Journal returned a different intent; do not replay.')
     return result

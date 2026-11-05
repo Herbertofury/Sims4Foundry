@@ -14,6 +14,10 @@ path and session record, registers the immutable input intent before calling the
 journal, and keeps the common gate pending until an acknowledgement for that
 same intent is present. A registry or journal failure leaves it pending. This
 only coordinates callers that use these functions and the same authority. The
+registered input path also requires the same live process witness: it holds the
+provider against reentrant close and rechecks the retained process identity and
+liveness immediately before each backend post. The process can still exit
+between a check and dispatch, and no atomic game UI transition is proven. The
 path binding alone does not retain a directory handle. On Windows,
 acknowledgement reconciliation pins each validated record and its ancestor path
 through the registry update and repeats full journal validation under those
@@ -48,6 +52,9 @@ owner's existing witness. A lost raw handle remains pending. An already
 anchored acquisition can be checked without a second open or resolution. This
 binds provider assertions; it does not add client authentication,
 loaded-image proof, restart recovery, slot retirement or atomic UI dispatch.
+The held witness is guarded while its acquisition resolution is anchored; an
+old receipt or `reconciled_existing` response does not prove the current gate
+is free. Each new action must still pass the current registry pending check.
 
 `SQLiteAnchor` supplies an explicit local database with full-synchronous
 SQLite transactions and cross-process compare-and-swap for cooperative
