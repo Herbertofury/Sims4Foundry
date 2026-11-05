@@ -148,7 +148,12 @@ on an uncertain input, completion, or confirmation reply. After an uncertain
 completion it permits only explicit inspection of that same owner; a ready
 completion requires an explicit confirmation, and a confirmed completion can
 be recognized without resending input or cleanup. Mismatched request IDs,
-tokens or fixture status are refused. This caller is an in-process experiment:
-its gate and the owner's gate do not bind other `LiveOwner` instances, other
-processes, direct owner calls, or another authority. No client or owner state
-survives process loss. It is not wired into the service or a game CLI.
+tokens or fixture status are refused. The client handles loss of its owner's
+response only: its own enclosing caller can lose a response after the client
+has cleared its pending state. That outer delivery requires its own explicit
+inspection and continuation contract before dependent actions. This caller is
+an in-process experiment: its gate and the owner's gate do not bind other
+`LiveOwner` instances, other processes, direct owner calls, or another authority.
+No client or owner state survives process loss. It is not wired into the service
+or a game CLI. A fixture click receipt does not authenticate the evidence or
+establish any semantic state.
