@@ -142,8 +142,11 @@ def parser():
     resolve = commands.add_parser("game-launch-reconcile-not-dispatched", help="Resolve only a proven never-dispatched launch; never cancel EA work")
     resolve.add_argument("--profile-session", required=True)
     resolve.add_argument("--session", required=True)
-    profile = commands.add_parser("test-profile", help="Prepare and restore an explicit test profile")
-    profile.add_argument("action", choices=("activate", "status", "restore", "recover", "recover-activation"))
+    profile = commands.add_parser("test-profile", help="Prepare and restore an explicit test profile",
+        description=("Receipt inspection observes point-in-time identity; its lock may be created or initialized. "
+                     "It does not move a profile, verify save integrity, or authorize launch."))
+    profile.add_argument("action", choices=("activate", "status", "restore", "recover", "recover-activation",
+                                            "inspect-restoration-receipt"))
     profile.add_argument("--session", required=True)
     profile.add_argument("--profile")
     testmods = commands.add_parser("test-mods", help="Install, inspect, or retire a selected test-mod set")
@@ -277,6 +280,10 @@ def run(args):
             return neutral_profile.restore(args.session)
         if args.action == "recover":
             return neutral_profile.recover(args.session)
+        if args.action == "inspect-restoration-receipt":
+            if args.profile is not None:
+                raise FoundryError("invalid_arguments", "Receipt inspection uses only the exact existing session.")
+            return neutral_profile.reconcile_restored_receipt(args.session)
         return neutral_profile.recover_activation(args.session)
     if args.command == "test-mods":
         if args.action == "status":
