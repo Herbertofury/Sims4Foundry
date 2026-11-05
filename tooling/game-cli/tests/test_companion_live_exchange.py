@@ -402,8 +402,9 @@ class ExchangeScenarios:
         server = list(getattr(policy, 'auth_stages', []))[-16:] if policy is not None else []
         server_codes = list(getattr(policy, 'auth_codes', []))[-16:] if policy is not None else []
         calls = list(getattr(policy, 'auth_call_errors', []))[-16:] if policy is not None else []
-        return 'fixture callback: kind=%s code=%s errno=%s client=%s server=%s server_codes=%s calls=%s' % (
-            kind, code, number, self.client_auth_stages[-16:], server, server_codes, calls)
+        deadlines = list(getattr(policy, 'auth_deadline_reasons', []))[-16:] if policy is not None else []
+        return 'fixture callback: kind=%s code=%s errno=%s client=%s server=%s server_codes=%s calls=%s deadlines=%s' % (
+            kind, code, number, self.client_auth_stages[-16:], server, server_codes, calls, deadlines)
 
     def admit(self, message, ticket):
         self.admissions.append(self.records())
@@ -654,6 +655,15 @@ class ExchangeScenarios:
 
 
 class AuthenticatedExchangeTests(ExchangeScenarios, unittest.TestCase):
+    def test_fixture_deadline_diagnostics_categorize_exact_failed_check(self):
+        from foundry_companion import peer_auth
+        fixture = self.fixture()
+        with patch.object(peer_auth, 'monotonic', return_value=10.0):
+            for deadline in (9.0,16.0,float('nan')):
+                with self.assertRaises(peer_auth.PeerAuthError): peer_auth._remaining(deadline)
+        self.assertEqual(['expired','above_limit','invalid_or_other'],fixture.policy.auth_deadline_reasons)
+        self.assertNotIn('10.0',self.error_details())
+
     def test_fixture_diagnostics_do_not_echo_unknown_error_data(self):
         class ForeignError(Exception):
             code = 'PRIVATE-UNRECOGNIZED-CODE'

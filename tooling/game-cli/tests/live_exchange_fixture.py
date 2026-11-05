@@ -86,6 +86,7 @@ class FabricatedPolicy(transport.DenyHostPolicy):
         self.auth_stages = []
         self.auth_codes = []
         self.auth_call_errors = []
+        self.auth_deadline_reasons = []
 
     def note(self, collection, value):
         if len(collection) < 64:
@@ -172,6 +173,16 @@ class Fixture(object):
                            'auth_nonce','auth_proof','auth_truncated','auth_size','auth_depth',
                            'peer_auth_failed'}
                 self.policy.note(self.policy.auth_codes, code if type(code) is str and code in allowed else 'other')
+                if code == 'auth_deadline':
+                    # Only bounded static categories leave the fixture. This
+                    # reads the exact failing check's local value, not a later
+                    # clock sample, and never logs times or exception text.
+                    frame = sys._getframe(1)
+                    left = frame.f_locals.get('left') if frame.f_code.co_name == '_remaining' else None
+                    reason = ('expired' if type(left) in (int,float) and left <= 0 else
+                              'above_limit' if type(left) in (int,float) and left > peer_auth.MAX_DEADLINE_SECONDS else
+                              'invalid_or_other')
+                    self.policy.note(self.policy.auth_deadline_reasons, reason)
             return original_require(condition, code)
         self.trace_patch = patch.object(peer_auth, '_require', traced_require)
         self.trace_patch.start()
