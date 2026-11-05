@@ -75,6 +75,19 @@ class InputFrameEvidenceTests(unittest.TestCase):
                 with self.assertRaises(FoundryError):
                     input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
         self.assertFalse((self.root/'evidence').exists())
+    def test_changed_target_geometry_is_refused_before_output(self):
+        with self.backend() as backend:
+            self.dispatch(backend)
+            original = self.api.geometry
+            def changed(expected):
+                value = original(expected)
+                value['client_width'] += 1
+                return value
+            self.api.geometry = changed
+            with self.assertRaises(FoundryError):
+                input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+        self.assertFalse((self.root/'evidence').exists())
+        self.assertEqual('awaiting_readback',self.history.status('2'*32)['state'])
 
 
 if __name__ == '__main__': unittest.main()
