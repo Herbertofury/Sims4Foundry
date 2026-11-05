@@ -320,6 +320,8 @@ def inspect_prior_sessions(target, sessions):
                 row['state'] not in ('rejected','acknowledged_by_host') for row in runs)
             rows.append({'session_id':journal.session['session_id'],'journal_sha256':binding,
                          'registry_head':current['head'],'pending_observed':pending,
+                         'witness_may_be_held':any(event.get('kind') == 'attempt'
+                             and event.get('operation') in ('acquire','global_acquire') for event in events),
                          'input_states':[{'request_id':row['request_id'],'state':row['state']} for row in runs]})
     return {'outcome':'specified_sessions_observed','sessions':rows,
             'pending_observed':any(row['pending_observed'] for row in rows),

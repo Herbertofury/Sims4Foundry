@@ -67,4 +67,6 @@ authority/session pairs. The session list is a JSON array of objects with
 and nonterminal journal runs for the specified lifetime. It cannot discover
 unknown authorities, prove that the list is complete, verify game state or
 authorize live input. Cooperative lock files or SQLite sidecars may be created;
-observations across sessions are not one atomic snapshot.
+observations across sessions are not one atomic snapshot. A resolved witness
+acquisition is reported as possibly still held; inspection does not contact the
+original owner or prove release.

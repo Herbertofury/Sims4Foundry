@@ -142,8 +142,15 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         with mock.patch.object(independent_session,'_open',return_value=(intent,registry,journal,registry.inspect())):
             result = authority.inspect_prior_sessions(identity(),pairs)
             self.assertFalse(result['pending_observed'])
+            self.assertFalse(result['sessions'][0]['witness_may_be_held'])
             self.assertFalse(result['complete_history_verified'])
             self.assertFalse(result['live_admission_authorized'])
+            process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+            witness = SessionWitness(registry,RetainedProcessRegistry(FakeWitnessApi(),lambda view:True),process,'4'*32)
+            witness.acquire()
+            result = authority.inspect_prior_sessions(identity(),pairs)
+            self.assertFalse(result['pending_observed'])
+            self.assertTrue(result['sessions'][0]['witness_may_be_held'])
             registry.begin('2'*32,'input','b'*64)
             result = authority.inspect_prior_sessions(identity(),pairs)
             self.assertTrue(result['pending_observed'])
