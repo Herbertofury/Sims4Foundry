@@ -132,3 +132,89 @@ def inspect(target):
     return {'outcome':'global_reservation_observed','scope':scope,'reservation_sha256':digest(row),
             'session_id':row['session_id'],'witness_id':row['witness_id'],'journal_sha256':row['journal_sha256'],
             'same_user_authenticated':False,'rollback_protected':False,'game_qualified':False}
+
+
+def claim_session(authority, session, witness_id):
+    """Reserve the lifetime for an existing unused cooperative session.
+
+    This rechecks original session/journal/registry records before publishing;
+    it does not discover or reconcile other previously used authorities.
+    """
+    from . import independent_session, registered_input
+    intent,registry,journal,state = independent_session._open(authority,session)
+    events = state['events']
+    if (len(events) != 1 or events[0].get('kind') != 'session'
+            or events[0].get('session_id') != intent['session_id'] or journal._runs()):
+        raise FoundryError('global_session_unresolved', 'An unused original session is required; inspect existing history.')
+    binding = registered_input.journal_binding(journal)
+    if events[0].get('journal_sha256') != binding:
+        raise FoundryError('global_session_unresolved', 'Original registry and journal do not match.')
+    return claim(intent['identity'],intent['session_id'],witness_id,binding)
+
+
+def attach_witness(registry, journal, witness):
+    """Bind an already-held original witness to its existing reservation.
+
+    No process is opened and no input is sent. The guard samples the retained
+    provider; registry, journal and reservation are not an atomic snapshot.
+    """
+    from . import registered_input
+    from .session_registry import SessionRegistry
+    from .session_witness import SessionWitness
+    if (type(registry) is not SessionRegistry or type(journal) is not input_journal.InputJournal
+            or type(witness) is not SessionWitness or witness._registry is not registry):
+        raise FoundryError('global_witness_binding', 'Original registry, journal and witness are required.')
+    target = input_journal._target(journal.session['target'])
+    identity = {key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+    if canonical(witness._identity) != canonical(identity):
+        raise FoundryError('global_witness_binding', 'Witness lifetime differs from the reserved target.')
+    with witness.guard_for_dispatch(registry) as check_live:
+        events = registered_input._check(registry,journal)
+        if (len(events) != 3 or events[1].get('kind') != 'attempt'
+                or events[1].get('operation') != 'acquire' or events[1].get('request_id') != witness._request
+                or events[1].get('intent_sha256') != witness._intent or events[-1].get('kind') != 'resolved'
+                or events[-1].get('request_id') != witness._request
+                or events[-1].get('intent_sha256') != witness._intent
+                or events[-1].get('outcome') != 'acknowledged'):
+            raise FoundryError('global_witness_binding', 'Original witness acquisition is not the latest resolved event.')
+        reservation = inspect(target)
+        binding = registered_input.journal_binding(journal)
+        if (reservation['session_id'] != journal.session['session_id']
+                or reservation['witness_id'] != witness._request or reservation['journal_sha256'] != binding):
+            raise FoundryError('global_witness_binding', 'Original reservation differs from this witness and journal.')
+        root,authority_id = _authority()
+        row = {'schema':1,'authority_id':authority_id,'scope':reservation['scope'],
+               'reservation_sha256':reservation['reservation_sha256'],'session_id':journal.session['session_id'],
+               'witness_id':witness._request,'acquisition_intent_sha256':witness._intent,
+               'registry_resolution_sha256':digest(events[-1])}
+        check_live()
+        try:
+            new_json(root/'lifetimes'/(reservation['scope']+'.attached.json'),row)
+        except FileExistsError:
+            raise FoundryError('global_witness_unresolved', 'Original attachment exists; inspect without repeating.',
+                               no_replay=True) from None
+        except Exception:
+            raise FoundryError('global_witness_unresolved', 'Witness attachment may have completed; inspect without retry.',
+                               no_replay=True) from None
+    return {'outcome':'global_witness_attached','scope':reservation['scope'],'attachment_sha256':digest(row),
+            'same_user_authenticated':False,'atomic_snapshot':False,'game_qualified':False}
+
+
+def inspect_attachment(target):
+    """Observe an existing attachment; never assert the witness is still held."""
+    reservation = inspect(target)
+    root,authority_id = _authority()
+    row = read_json(root/'lifetimes'/(reservation['scope']+'.attached.json'))
+    fields = {'schema','authority_id','scope','reservation_sha256','session_id','witness_id',
+              'acquisition_intent_sha256','registry_resolution_sha256'}
+    hashes = ('acquisition_intent_sha256','registry_resolution_sha256')
+    if (type(row) is not dict or set(row) != fields or type(row['schema']) is not int or row['schema'] != 1
+            or row['authority_id'] != authority_id or row['scope'] != reservation['scope']
+            or row['reservation_sha256'] != reservation['reservation_sha256']
+            or row['session_id'] != reservation['session_id'] or row['witness_id'] != reservation['witness_id']
+            or any(type(row[key]) is not str or len(row[key]) != 64
+                   or any(c not in '0123456789abcdef' for c in row[key]) for key in hashes)):
+        raise FoundryError('global_witness_unresolved', 'Original attachment is malformed or changed; do not retry.')
+    return {'outcome':'global_attachment_observed','scope':reservation['scope'],'attachment_sha256':digest(row),
+            'current_witness_verified':False,'registry_gate_verified':False,
+            'atomic_snapshot':False,'game_qualified':False}

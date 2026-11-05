@@ -19,10 +19,15 @@ interruption or a lost acknowledgment. Do not recreate an uncertain
 authority or replay an uncertain claim. There is no qualified retirement or
 restart-recovery procedure.
 An initialized authority or a missing/inaccessible reservation does not prove
-that an earlier independent authority sent no input. The reservation API
-currently accepts caller-supplied binding data and does not itself prove the
-actual retained owner, journal or registry. Reconcile all prior authorities and
-bind the live owner before considering admission.
+that an earlier independent authority sent no input. The lower-level
+reservation API accepts caller-supplied binding data; `claim_session` first
+reopens an existing unused session and binds its original journal and registry.
+`attach_witness` can subsequently publish an attachment to the matching held
+witness and its resolved acquisition. It samples the original provider guard
+but does not open a process. An existing attachment can be inspected after a
+lost reply; this does not prove the witness is still held or the gate is free.
+The registry, journal and global reservation are not an atomic snapshot.
+Neither the attachment nor the claim reconciles unknown prior authorities.
 
 Owned synthetic-directory tests cover two concurrent callers, two separate
 Python processes, changed target identity, a lost claim reply and malformed
