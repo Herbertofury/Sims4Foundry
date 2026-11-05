@@ -157,3 +157,14 @@ an in-process experiment: its gate and the owner's gate do not bind other
 No client or owner state survives process loss. It is not wired into the service
 or a game CLI. A fixture click receipt does not authenticate the evidence or
 establish any semantic state.
+
+The optional owned-window sequence fixture also exercises an explicit
+fixture-window message observer and the original owner's confirmation before a
+second click. Its first attempted run stopped at the first unresolved input
+before any journaled packet event, and child cleanup was not confirmed; the
+second click was not attempted. That run does not establish the cause or count
+as a successful sequential test. The original evidence is retained locally;
+the attempt must not be replayed or its uncertain cleanup repeated. A later
+owned-window run, if separately arranged, emits only allowlisted diagnostic
+codes for runner exceptions and retains the window while original owned
+resources remain unresolved. In-process retention does not survive process exit.

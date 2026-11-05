@@ -201,6 +201,9 @@ class WgcOwnedWindowTests(unittest.TestCase):
                 if os.environ.get('FOUNDRY_WGC_TEE_PROBE') == '1':
                     from wgc_tee_probe import _UNRESOLVED
                     unresolved = _UNRESOLVED
+                elif os.environ.get('FOUNDRY_WGC_REGISTERED_TEST') == '1':
+                    from registered_owned_fixture import _OWNED_UNRESOLVED
+                    unresolved = [{'hwnd':item[4]} for item in _OWNED_UNRESOLVED if len(item) > 4]
                 if not _stop_or_retain(thread,stop,state,unresolved) or not done.is_set():
                     raise AssertionError('Owned capture window or thread cleanup is unresolved')
 

@@ -31,6 +31,22 @@ from sims4foundry_cli.sqlite_anchor import SQLiteAnchor
 from sims4foundry_cli.visual_probe import _pixels
 
 _OWNED_UNRESOLVED = []
+_SAFE_DIAGNOSTICS = frozenset({
+    'unknown_foreground','foreground_changed','integrity_mismatch','ownership_changed',
+    'recording_unavailable','recording_unverified','input_context_unverified',
+    'stale_observation','invalid_sequence','input_cleanup_unresolved',
+    'input_preparation_failed','recording_start_failed','input_journal_bound',
+})
+
+
+def _trace_input_call(runner, diagnostics, *args):
+    """Collect a bounded public code only; preserve the runner's behavior."""
+    try:
+        return runner(*args)
+    except Exception as error:
+        code = error.code if isinstance(error,FoundryError) else None
+        diagnostics.append(code if type(code) is str and code in _SAFE_DIAGNOSTICS else 'other')
+        raise
 
 
 def _fixture_parent(path):
@@ -77,7 +93,11 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
         test.assertEqual(base,root.resolve(strict=True).parent)
         new_json(root/'fixture-manifest.json',{'schema':1,'kind':'owned_registered_fixture',
                                                'directory_name':root.name,'game_accessed':False})
+        diagnostics = []
         with ExitStack() as stack:
+            original_runner = input_journal.run_packets
+            stack.enter_context(mock.patch.object(input_journal,'run_packets',
+                                side_effect=lambda *args:_trace_input_call(original_runner,diagnostics,*args)))
             for module in (windows,input_journal,session_registry,guarded_input,wgc_recorder):
                 stack.enter_context(mock.patch.object(module,'validate_identity',side_effect=validate_owned))
             stack.enter_context(mock.patch.object(windows,'inspect',side_effect=inspect_owned))
@@ -133,7 +153,7 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
             provider = RetainedProcessRegistry(process_api,lambda view:True)
             process_identity={key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
             witness=SessionWitness(registry,provider,process_identity,'2'*32)
-            retained = [provider,None,str(root)]
+            retained = [provider,None,str(root),None,hwnd]
             _OWNED_UNRESOLVED.append(retained)
             lease=witness.acquire()
             retained[1] = lease
@@ -143,9 +163,11 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                 if os.environ.get('FOUNDRY_WGC_LIVE_OWNER_TEST') == '1':
                     owner = independent_live_owner.LiveOwner(registry,journal,witness,ffmpeg,ffmpeg_hash,
                                   _fixture_admission=independent_live_owner._OWNED_FIXTURE_ADMISSION)
-                    retained.append(owner)
+                    retained[3] = owner
                     result = owner.click_once('3'*32,20,30,expected_observation={'fixture':'white'},
                                               evidence_directory=root/'frame-evidence')
+                    if result.get('outcome') != 'frame_recorded':
+                        print('Owned input diagnostic:',diagnostics[-1] if diagnostics else 'no_runner_exception',flush=True)
                     test.assertEqual('frame_recorded',result['outcome'])
                     test.assertFalse(result['acknowledged'])
                     deadline=time.monotonic()+12
@@ -159,6 +181,34 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                         owner.click_once('3'*32,20,30,expected_observation={'fixture':'white'},
                                          evidence_directory=root/'different-evidence')
                     test.assertEqual(2,len(state['events']))
+                    if os.environ.get('FOUNDRY_WGC_OWNER_SEQUENCE_TEST') == '1':
+                        # The owned window's WndProc is the explicit fixture observer.
+                        # It is not a game observer or an operator attestation.
+                        expected_events = [(int(packet.message),packet.wparam,packet.lparam) for packet in packets]
+                        def observe(view, selected, expectation):
+                            test.assertEqual(expected_events,state['events'])
+                            test.assertEqual(target['hwnd'],selected['hwnd'])
+                            return dict(view,evidence_sha256=digest({'events':state['events']}),
+                                        observation=expectation)
+                        completion = owner.fixture_complete_step('3'*32,observe)
+                        test.assertEqual('ready',completion['completion_state'])
+                        with test.assertRaises(FoundryError):
+                            owner.click_once('4'*32,40,50,expected_observation={'fixture':'second'},
+                                             evidence_directory=root/'second-frame')
+                        inspected = owner.fixture_completion_snapshot('3'*32)
+                        test.assertEqual('confirmed',owner.fixture_confirm_completion(
+                            '3'*32,inspected['completion_token'])['completion_state'])
+                        second = owner.click_once('4'*32,40,50,expected_observation={'fixture':'second'},
+                                                  evidence_directory=root/'second-frame')
+                        test.assertEqual('frame_recorded',second['outcome'])
+                        second_packets = encode_click(Point(40,50),ClientBounds(target['client_width'],target['client_height']))
+                        deadline = time.monotonic()+12
+                        while len(state['events']) < 4 and time.monotonic() < deadline: time.sleep(.05)
+                        test.assertEqual(expected_events + [(int(packet.message),packet.wparam,packet.lparam)
+                                                            for packet in second_packets],state['events'])
+                        test.assertEqual('awaiting_readback',journal.status('4'*32)['state'])
+                        test.assertFalse(second['semantic_state_verified'])
+                        test.assertFalse(second['game_qualified'])
                     test.assertEqual('sender_cleanup_reported',owner.close_sender()['outcome'])
                 else:
                     run_original(test,registry,journal,witness,packets,target,ffmpeg,ffmpeg_hash,state,root)
@@ -167,7 +217,7 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                 test.assertTrue(closed)
                 _OWNED_UNRESOLVED.remove(retained)
                 new_json(root/'fixture-outcome.json',{'schema':1,'journal_state':'awaiting_readback',
-                         'request_id':'3'*32,'capture_time_verified':False,'game_qualified':False})
+                         'request_id':('4' if os.environ.get('FOUNDRY_WGC_OWNER_SEQUENCE_TEST') == '1' else '3')*32,'capture_time_verified':False,'game_qualified':False})
             finally:
                 # An uncertain witness close is never retried.
                 if not closed:
