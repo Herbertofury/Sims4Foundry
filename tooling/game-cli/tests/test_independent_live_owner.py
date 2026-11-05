@@ -84,6 +84,31 @@ class IndependentLiveOwnerTests(unittest.TestCase):
                                      evidence_directory=self.root/'other')
             backend.assert_not_called()
 
+    def test_unresolved_input_result_exposes_no_replay_and_uncertainty(self):
+        self.api.on_post = lambda packet: False
+        result = self.click()
+        self.assertEqual('input_unresolved',result['outcome'])
+        self.assertEqual('after_admission_entry',result['phase'])
+        self.assertTrue(result['input_may_have_been_sent'])
+        self.assertTrue(result['no_replay'])
+
+    def test_interrupt_after_sender_enter_keeps_original_sender_quarantined(self):
+        original = live_input.LiveInputBackend.__enter__
+        def interrupt(backend):
+            original(backend)
+            raise KeyboardInterrupt()
+        with mock.patch.object(live_input.LiveInputBackend,'__enter__',interrupt):
+            with self.assertRaises(KeyboardInterrupt): self.click()
+        backend = self.owner._backend
+        self.assertTrue(any(item is backend for item in independent_live_owner._UNRESOLVED_SENDERS))
+        self.assertFalse(self.owner._backend_open)
+        self.assertEqual('attempt',self.registry.inspect()['events'][-1]['kind'])
+        with self.assertRaises(FoundryError): self.owner.close_sender()
+        # This fixture knows the injected interruption happened after entry;
+        # its fake API/recorder can be closed directly without native I/O.
+        backend.__exit__(None,None,None)
+        independent_live_owner._UNRESOLVED_SENDERS.remove(backend)
+
     def test_lost_journal_reply_can_recover_only_original_retained_sender(self):
         original = self.journal.execute_once
         def lose_reply(*args, **kwargs):

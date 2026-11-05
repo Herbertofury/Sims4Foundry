@@ -10,6 +10,8 @@ from copy import deepcopy
 import ctypes
 from ctypes import wintypes as wt
 import hashlib
+import io
+import json
 import os
 from pathlib import Path
 import sys
@@ -18,7 +20,7 @@ import time
 import uuid
 from unittest import mock
 
-from sims4foundry_cli import (guarded_input, independent_live_owner, input_frame_evidence, input_journal, live_input, native_input, process_exit,
+from sims4foundry_cli import (guarded_input, independent_live_owner, independent_live_service, input_frame_evidence, input_journal, live_input, native_input, process_exit,
                               registered_input, session_registry, windows, windows_registry_key, wgc_recorder)
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Point, encode_click
@@ -85,6 +87,29 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
             key = windows_registry_key.create_key(root/'registry-key.json',digest(session_registry._lifetime(target)))
             registry = session_registry.SessionRegistry(registry_dir,target,key,anchor)
             registry.open_session('1'*32,registered_input.journal_binding(journal))
+            if os.environ.get('FOUNDRY_WGC_LIVE_SERVICE_TEST') == '1':
+                intent = {'session_id':'1'*32,'identity':target}
+                commands = [
+                    {'op':'click','request_id':'3'*32,'x':20,'y':30,'expectation':{'fixture':'white'},
+                     'evidence_directory':str(root/'frame-evidence')},
+                    {'op':'input_status','request_id':'3'*32},
+                    {'op':'stop','abandon':True}]
+                source = io.BytesIO(b''.join(json.dumps(command).encode()+b'\n' for command in commands))
+                sink = io.StringIO()
+                with mock.patch.object(independent_live_service.independent_session,'_open',
+                                       return_value=(intent,registry,journal,registry.inspect())):
+                    result = independent_live_service.serve(root/'unused-authority',root,'2'*32,ffmpeg,ffmpeg_hash,
+                                                            input_stream=source,output_stream=sink)
+                rows = [json.loads(line) for line in sink.getvalue().splitlines()]
+                test.assertEqual('experimental_owner_ready',rows[0]['outcome'])
+                test.assertEqual('frame_recorded',rows[1]['outcome'])
+                test.assertEqual('awaiting_readback',rows[2]['input']['state'])
+                test.assertEqual('owner_stopped',result['outcome'])
+                deadline=time.monotonic()+12
+                while len(state['events']) < 2 and time.monotonic() < deadline: time.sleep(.05)
+                test.assertEqual(2,len(state['events']))
+                test.assertFalse(rows[1]['acknowledged'])
+                return
             provider = RetainedProcessRegistry(process_api,lambda view:True)
             process_identity={key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
             witness=SessionWitness(registry,provider,process_identity,'2'*32)
@@ -97,6 +122,7 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                 packets=encode_click(Point(20,30),ClientBounds(target['client_width'],target['client_height']))
                 if os.environ.get('FOUNDRY_WGC_LIVE_OWNER_TEST') == '1':
                     owner = independent_live_owner.LiveOwner(registry,journal,witness,ffmpeg,ffmpeg_hash)
+                    retained.append(owner)
                     result = owner.click_once('3'*32,20,30,expected_observation={'fixture':'white'},
                                               evidence_directory=root/'frame-evidence')
                     test.assertEqual('frame_recorded',result['outcome'])

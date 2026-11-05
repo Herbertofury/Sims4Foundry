@@ -31,6 +31,13 @@ def parser():
     independent.add_argument("--session")
     independent.add_argument("--identity", help="External Foundry identity JSON; accepted as supplied, never inspected live")
     independent.add_argument("--request-id")
+    live_owner = commands.add_parser("experimental-live-owner", help="Foreground single-owner stdin service; not game-qualified")
+    live_owner.add_argument("--authority", required=True)
+    live_owner.add_argument("--session", required=True)
+    live_owner.add_argument("--witness-id", required=True)
+    live_owner.add_argument("--ffmpeg", required=True)
+    live_owner.add_argument("--ffmpeg-sha256", required=True)
+    live_owner.add_argument("--allow-experimental", action="store_true")
     fixture_owner = commands.add_parser("fixture-owner", help="Synthetic retained owner only; never controls the game")
     fixture_owner.add_argument("action", choices=("identity", "serve", "serve-persistent", "client", "receipt", "launch", "interactive"))
     fixture_owner.add_argument("--authority")
@@ -177,6 +184,11 @@ def parser():
 
 
 def run(args):
+    if args.command == "experimental-live-owner":
+        if not args.allow_experimental:
+            raise FoundryError("live_owner_unqualified", "Explicit experimental opt-in is required; this is not game-qualified.")
+        from . import independent_live_service
+        return independent_live_service.serve(args.authority,args.session,args.witness_id,args.ffmpeg,args.ffmpeg_sha256)
     if args.command == "fixture-owner":
         from . import fixture_launcher
         if args.action == "identity":

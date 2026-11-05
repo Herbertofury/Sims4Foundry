@@ -49,7 +49,35 @@ without another input. If cleanup is interrupted or unconfirmed, do not retry
 it or reopen a sender. No input acknowledgment, UI transition,
 semantic state or game qualification is claimed. Its owner must remain on the
 same thread and must independently manage witness acquisition and lifetime.
-This is not wired into the installed CLI or a cross-process owner service.
+The installed CLI exposes a foreground, newline-delimited JSON service:
+
+```text
+foundry-game experimental-live-owner --authority AUTHORITY_DIR --session SESSION_DIR --witness-id 32_LOWERCASE_HEX --ffmpeg FFMPEG.exe --ffmpeg-sha256 64_LOWERCASE_HEX --allow-experimental
+```
+
+The session must already have been initialized against the exact selected
+identity. This command retains an image pin and process witness for that
+identity; it does not start the game or prepare a profile. After its ready
+message, send one JSON object per line, for example:
+
+```json
+{"op":"status"}
+{"op":"click","request_id":"22222222222222222222222222222222","x":20,"y":30,"expectation":{"screen":"expected"},"evidence_directory":"C:\\FoundryEvidence\\new-frame"}
+{"op":"input_status","request_id":"22222222222222222222222222222222"}
+{"op":"stop","abandon":true}
+```
+
+`recover_frame_binding` accepts the original `request_id`; `capture_frame`
+also accepts a new `evidence_directory`. Both use the still-retained sender and
+send no input. Frame output and input status do not acknowledge a transition.
+The shared gate remains pending after a click, so this service cannot drive a
+sequence of game operations. A stop with `abandon:true` makes one cleanup
+attempt and closes the original witness; it does not resolve pending input,
+save or quit the game, or prove OS release. Loss of the console or process
+does not recover the witness after restart. An owner-intent record prevents a
+second acquisition through this session; inspect it and the original journal
+after an uncertain start or response. The service has no cross-process client
+authentication and must not be treated as a production authority.
 
 An opt-in owned-window fixture exercised this composition using real Windows
 message posting and WGC against the test's own Python process. The fixture

@@ -16,6 +16,8 @@ from .live_input import LiveInputBackend
 from .session_registry import SessionRegistry
 from .session_witness import SessionWitness
 
+_UNRESOLVED_SENDERS = []
+
 
 class LiveOwner:
     """One original thread, retained witness and cooperative journal/registry."""
@@ -67,6 +69,10 @@ class LiveOwner:
             def prepare():
                 backend = LiveInputBackend(target,packets,self._ffmpeg,self._ffmpeg_sha256)
                 self._backend = backend
+                # Retain before entering: an asynchronous interruption after
+                # __enter__ returns but before the next assignment must not
+                # silently drop ownership of a possibly open sender.
+                _UNRESOLVED_SENDERS.append(backend)
                 backend.__enter__()
                 self._backend_open = True
                 return backend
@@ -76,9 +82,11 @@ class LiveOwner:
                 expected_observation=expectation,witness=self._witness)
             if result.get('state') != 'awaiting_readback':
                 return {'outcome':'input_unresolved','request_id':request_id,'input':result,
+                        'phase':'after_admission_entry','input_may_have_been_sent':True,'no_replay':True,
                         'acknowledged':False,'game_qualified':False}
             evidence = input_frame_evidence.capture(self._journal,request_id,self._backend,output)
             return {'outcome':'frame_recorded','request_id':request_id,'input':result,'evidence':evidence,
+                    'input_may_have_been_sent':True,'no_replay':True,
                     'acknowledged':False,'semantic_state_verified':False,'game_qualified':False}
         except Exception as error:
             if not admission_entered and isinstance(error,FoundryError):
@@ -122,4 +130,8 @@ class LiveOwner:
             raise FoundryError('live_owner_cleanup_unresolved', 'Original sender cleanup is uncertain; do not retry.',
                                no_replay=True) from None
         self._backend_open = False
+        for index,item in enumerate(_UNRESOLVED_SENDERS):
+            if item is self._backend:
+                del _UNRESOLVED_SENDERS[index]
+                break
         return {'outcome':'sender_cleanup_reported','os_release_verified':False,'game_qualified':False}
