@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import math
 import threading
 
-from build_transform import _snapshot, _tuple, _number, MAX_COORDINATE
+from .build_transform import _snapshot, _tuple, _number, MAX_COORDINATE
 from foundry_companion.build_observation import BuildContext, _context_copy, _context_key
 from foundry_companion.native import NativeRefusal, _id
 from foundry_companion.queue import _decimal_id, _token

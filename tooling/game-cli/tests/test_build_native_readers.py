@@ -9,7 +9,7 @@ from types import SimpleNamespace as NS
 SOURCE = Path(__file__).resolve().parents[1] / 'companion-src'
 sys.path.insert(0, str(SOURCE))
 sys.path.insert(0, str(SOURCE.parent / 'build-adapter-src'))
-from build_native_readers import BuildNativeReaders
+from foundry_build_adapter.build_native_readers import BuildNativeReaders
 from foundry_companion.build_observation import BuildContext, BuildObserver
 from foundry_companion.native import DenyAdmission, NativeRefusal
 from foundry_companion.queue import ObserveArguments, ProcessEpoch, Request
@@ -166,7 +166,7 @@ class NativeReadersTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', str(error.exception))
 
     def test_module_is_python37_and_has_no_game_or_side_effect_imports(self):
-        source = (SOURCE.parent / 'build-adapter-src' / 'build_native_readers.py').read_text()
+        source = (SOURCE.parent / 'build-adapter-src' / 'foundry_build_adapter' / 'build_native_readers.py').read_text()
         tree = ast.parse(source, feature_version=7) if sys.version_info >= (3, 8) else ast.parse(source)
         roots = []
         for node in ast.walk(tree):

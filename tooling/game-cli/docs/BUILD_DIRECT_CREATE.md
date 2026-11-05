@@ -1,14 +1,15 @@
 # Direct Build object creation
 
-`build-adapter-src/build_create.py` adds one direct object-creation step. It
+`build-adapter-src/foundry_build_adapter/build_create.py` adds one direct object-creation step. It
 does not move the created object, charge household funds, select a catalog
 item, record a Build/Buy transaction, clean up, or implement undo. A successful
 creation result explicitly reports `placed: false`. This is not a qualified
 Build/Buy placement workflow.
 
-The code is outside the fixed companion archive, has no startup or CLI route,
-and has not been executed in the game. It has no Apex dependency. Any later
-integration must be coordinated with the owner of startup and packaging.
+The code is outside the fixed companion archive and can be built as a separate
+development archive; it has no startup or game-control CLI route and has not
+been executed in the game. It has no Apex dependency. See
+[BUILD_ADAPTER_PACKAGE.md](BUILD_ADAPTER_PACKAGE.md).
 
 Read-only inspection of the installed game's `objects/system.pyc` identified
 `objects.system.create_object(definition_or_id, ...)`; the game's own

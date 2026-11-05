@@ -10,7 +10,7 @@ from types import SimpleNamespace as NS
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'companion-src'))
 sys.path.insert(0, str(ROOT / 'build-adapter-src'))
-from build_transform import BuildTransformExecutor, TransformRequest
+from foundry_build_adapter.build_transform import BuildTransformExecutor, TransformRequest
 from foundry_companion.build_observation import BuildContext
 from foundry_companion.native import NativeRefusal
 from foundry_companion.queue import ProcessEpoch

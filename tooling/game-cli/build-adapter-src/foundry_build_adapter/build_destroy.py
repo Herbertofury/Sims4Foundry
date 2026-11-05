@@ -6,7 +6,7 @@ No game services are imported and no behavior runs without an explicit caller.
 from dataclasses import dataclass
 import threading
 
-from build_transform import _snapshot, _surface, _tuple, MAX_COORDINATE
+from .build_transform import _snapshot, _surface, _tuple, MAX_COORDINATE
 from foundry_companion.build_observation import BuildContext, _context_copy, _context_key
 from foundry_companion.native import NativeRefusal
 from foundry_companion.queue import _decimal_id, _token

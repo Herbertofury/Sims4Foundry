@@ -1,6 +1,6 @@
 # Direct Build object destruction
 
-`build-adapter-src/build_destroy.py` implements a one-shot call to
+`build-adapter-src/foundry_build_adapter/build_destroy.py` implements a one-shot call to
 `destroy()` on one explicitly identified existing, unparented non-Sim world
 object. It is **not** the Build/Buy delete/sell action: it does not establish
 refunds, catalog behavior, child-object handling, undo/redo or persistence.
@@ -8,8 +8,9 @@ It supplies no implicit restore or retry. Its source evidence is the
 installed-game `server_commands/object_commands.pyc` call shape described
 in [BUILD_DIRECT_TRANSFORM.md](BUILD_DIRECT_TRANSFORM.md).
 
-The code is outside the fixed companion archive and is not installed, exposed
-to the CLI, or qualified in the game. It has no Apex dependency. Integration
+The code is outside the fixed companion archive and can be built separately;
+it is not installed, exposed to the game-control CLI, or qualified in the game.
+See [BUILD_ADAPTER_PACKAGE.md](BUILD_ADAPTER_PACKAGE.md). It has no Apex dependency. Integration
 with the parallel startup and transport work requires review and coordination.
 
 The host supplies exact Build readers and a separately reviewed admission

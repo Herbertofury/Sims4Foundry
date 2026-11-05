@@ -1,14 +1,15 @@
 # Build/Buy native service readers
 
-`build-adapter-src/build_native_readers.py` supplies the two reader callbacks
+`build-adapter-src/foundry_build_adapter/build_native_readers.py` supplies the two reader callbacks
 required by the existing `BuildObserver`. It derives a Build context from a
 host-supplied services object and resolves only requested object IDs through
 `services.object_manager().get(id)`. It has no Apex dependency.
 
 This is source and fixture-tested integration, not an installed game feature.
 The file is intentionally outside `companion-src`: the other Foundry workstream
-owns startup and its fixed companion archive manifest. It is not currently
-packaged, bootstrapped, connected to the transport or available as a CLI command.
+owns startup and its fixed companion archive manifest. It can be built into a separate development archive, but is not bootstrapped,
+connected to the transport or available as a game-control CLI command. See
+[BUILD_ADAPTER_PACKAGE.md](BUILD_ADAPTER_PACKAGE.md).
 Integrating it into the actual companion requires updating that manifest and
 reviewing the owner/runtime path in coordination with that workstream.
 

@@ -1,14 +1,15 @@
 # Direct Build object definition variant
 
-`build-adapter-src/build_variant.py` is an explicit, one-shot direct
+`build-adapter-src/foundry_build_adapter/build_variant.py` is an explicit, one-shot direct
 definition change for an existing selected world object. It requires the
 current and requested definition IDs to report the same nonzero variant group.
 This is **not** a qualified catalog swatch operation: a shared group does not
 prove visual equivalence, preserve object components or establish an
 undoable Build transaction.
 
-The module is outside the fixed companion package; it is not installed,
-connected to the CLI, or tested in the game. It has no Apex dependency.
+The module is outside the fixed companion package and can be built separately;
+it is not installed, connected to the game-control CLI, or tested in the game.
+See [BUILD_ADAPTER_PACKAGE.md](BUILD_ADAPTER_PACKAGE.md). It has no Apex dependency.
 
 Read-only inspection of the installed game's `simulation.zip` identified
 `server_commands.object_commands.set_object_definition` calling

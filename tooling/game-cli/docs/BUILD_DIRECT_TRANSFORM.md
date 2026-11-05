@@ -1,6 +1,6 @@
 # Direct Build object transform
 
-`build-adapter-src/build_transform.py` implements a guarded direct transform
+`build-adapter-src/foundry_build_adapter/build_transform.py` implements a guarded direct transform
 of one explicitly identified, existing, unparented world object. It can set a
 destination, world floor and yaw together after an explicit native placement
 test. It does **not** purchase or place a catalog item, edit a swatch, delete an
@@ -8,8 +8,9 @@ object, or create a Build/Buy undo/redo transaction. It does not enter Build
 mode. This distinction matters: direct `move_to` is not proof that the game
 recorded an ordinary Build transaction or charged funds.
 
-The module is outside the fixed companion archive manifest and is not
-bootstrapped, installed, exposed through the CLI, or live-game qualified.
+The module is outside the fixed companion archive manifest and can be built as
+a separate development archive; it is not bootstrapped, installed, exposed
+through a game-control CLI, or live-game qualified. See [BUILD_ADAPTER_PACKAGE.md](BUILD_ADAPTER_PACKAGE.md).
 It has no Apex dependency. A separate integration must coordinate changes to
 the companion package, transport and startup path with their current owner.
 

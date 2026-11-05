@@ -11,6 +11,7 @@ dependencies = []
 
 [project.scripts]
 foundry-game = "sims4foundry_cli.cli:main"
+foundry-build-adapter = "sims4foundry_cli.build_adapter_build:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
