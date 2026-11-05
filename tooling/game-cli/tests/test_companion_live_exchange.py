@@ -369,10 +369,13 @@ class ExchangeScenarios:
         self.item = submission()
         self.calls, self.errors, self.replies, self.before_socket, self.before_auth = [], [], [], [], []
         self.admissions = []
+        self.client_auth_stages = []
+        self.last_fixture = None
 
     def fixture(self, fault=None, rows=1):
         from live_exchange_fixture import Fixture, ProcessFixture
         fixture = ProcessFixture(self, self.root, fault, rows) if self.process else Fixture(self.root, fault, rows)
+        self.last_fixture = fixture
         if not self.process:
             from live_exchange_fixture import assert_no_game_imports
             assert_no_game_imports()
@@ -385,8 +388,20 @@ class ExchangeScenarios:
 
     def error_details(self):
         error = self.errors[-1] if self.errors else None
-        return 'fixture callback: type=%s code=%s errno=%s' % (
-            type(error).__name__, getattr(error, 'code', None), getattr(error, 'errno', None))
+        code = getattr(error, 'code', None)
+        allowed = {'auth_binding','auth_socket','auth_deadline','auth_random','auth_envelope','auth_nonce',
+                   'auth_proof','auth_truncated','auth_size','auth_depth','peer_auth_failed',
+                   'connection_deadline','truncated_frame','invalid_frame','extra_frame','peer_denied'}
+        code = code if type(code) is str and code in allowed else 'other'
+        kind = ('peer_auth' if isinstance(error, auth.PeerAuthError) else
+                'protocol' if isinstance(error, wire.ProtocolError) else
+                'os_error' if isinstance(error, OSError) else 'other')
+        number = getattr(error, 'errno', None)
+        number = number if type(number) is int and 0 <= number <= 65535 else None
+        policy = getattr(self.last_fixture, 'policy', None)
+        server = list(getattr(policy, 'auth_stages', []))[-16:] if policy is not None else []
+        return 'fixture callback: kind=%s code=%s errno=%s client=%s server=%s' % (
+            kind, code, number, self.client_auth_stages[-16:], server)
 
     def admit(self, message, ticket):
         self.admissions.append(self.records())
@@ -397,7 +412,14 @@ class ExchangeScenarios:
         peer = auth.SessionKeyPeer(KEY if key is None else key)
         def authorize(connection, deadline, view):
             self.before_auth.append(self.records())
-            return peer(connection, deadline, view)
+            self.client_auth_stages.append('start')
+            try:
+                result = peer(connection, deadline, view)
+            except Exception:
+                self.client_auth_stages.append('error')
+                raise
+            self.client_auth_stages.append('accepted' if result is True else 'refused')
+            return result
         def exchange(message, ticket):
             self.calls.append((message, ticket))
             self.before_socket.append(self.records())
@@ -462,8 +484,8 @@ class ExchangeScenarios:
         fixture = self.fixture(rows=rows)
         try:
             status = self.submit(fixture)
-        except FoundryError as error:
-            raise AssertionError('Unexpected fixture submission failure: ' + self.error_details()) from error
+        except FoundryError:
+            raise AssertionError('Unexpected fixture submission failure: ' + self.error_details()) from None
         self.assertEqual('accepted', status.state)
         self.assertFalse(status.mutation)
         self.assertEqual(['intent'], [row['kind'] for row in self.admissions[0]])
@@ -478,8 +500,8 @@ class ExchangeScenarios:
         for _ in range(2):
             try:
                 status = self.reconcile(fixture)
-            except FoundryError as error:
-                raise AssertionError('Unexpected fixture reconciliation failure: ' + self.error_details()) from error
+            except FoundryError:
+                raise AssertionError('Unexpected fixture reconciliation failure: ' + self.error_details()) from None
             self.assertEqual('adapter_returned', status.state)
             self.assertEqual('unverified', status.receipt.adapter_outcome)
             self.assertFalse(status.mutation)
@@ -547,11 +569,8 @@ class ExchangeScenarios:
         result = fixture.last_result
         try:
             status = self.reconcile(fixture)
-        except FoundryError as error:
-            underlying = self.errors[-1] if self.errors else None
-            raise AssertionError('Receipt-only fixture reconciliation failed: type=%s code=%s errno=%s' %
-                                 (type(underlying).__name__, getattr(underlying, 'code', None),
-                                  getattr(underlying, 'errno', None))) from error
+        except FoundryError:
+            raise AssertionError('Receipt-only fixture reconciliation failed: ' + self.error_details()) from None
         self.assertEqual('adapter_returned', status.state)
         self.assertEqual(result, self.replies[-1]['adapter_result'])
         self.assertTrue(status.uncertainty_latched)

@@ -83,13 +83,27 @@ class FabricatedPolicy(transport.DenyHostPolicy):
         self.root, self.owner = root, threading.current_thread()
         self.auth = peer_auth.SessionKeyPeer(KEY)
         self.submissions, self.admissions, self.disk = [], [], []
+        self.auth_stages = []
 
     def authorize_listener(self, binding):
         return binding.session_id == SESSION and binding.process_epoch == EPOCH
 
     def authorize_peer(self, connection, peer, binding, deadline):
         # Existing four-frame protocol and hook remain unchanged.
-        return self.auth.authorize_peer(connection, peer, binding, deadline)
+        self.auth_stages.append('start')
+        try:
+            result = self.auth.authorize_peer(connection, peer, binding, deadline)
+        except peer_auth.PeerAuthError:
+            self.auth_stages.append('auth_error')
+            raise
+        except OSError:
+            self.auth_stages.append('os_error')
+            raise
+        except Exception:
+            self.auth_stages.append('other_error')
+            raise
+        self.auth_stages.append('accepted' if result is True else 'refused')
+        return result
 
     def allowed(self, item, binding):
         return (type(item) is live_wire.Submission
@@ -214,6 +228,7 @@ class Fixture(object):
         state = self.server.queue_status()
         owner = self.policy.owner
         return dict(messages=deepcopy(self.server.messages),
+                    auth_stages=list(self.policy.auth_stages),
                     submissions=len(self.policy.submissions), executions=len(self.executions),
                     reader_calls=len(self.harness.calls), auth_ready_fault=self.auth_ready_fault,
                     owner_only=(all(thread is owner for _, thread in self.executions)
