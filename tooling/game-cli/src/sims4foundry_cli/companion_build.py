@@ -6,6 +6,7 @@ imported or executed. A build is not installation or live-game qualification.
 """
 import base64
 import binascii
+from contextlib import nullcontext
 import hashlib
 import io
 import os
@@ -19,6 +20,7 @@ import threading
 import zipfile
 
 from .errors import FoundryError
+from .capture_pin import retained_compiler_image
 from .io import MAX_JSON, canonical, exact_fields, external_path, loads, new_json, plain_path, sync_directory
 from .launch import _same_open_source, _stamp
 
@@ -288,7 +290,12 @@ def _compile(payloads, compiler, expected_hash, scratch):
                          for name, raw in payloads])
     if len(request) > MAX_JSON:
         raise FoundryError("build_source_bounds", "Compiler request exceeds its JSON bound.")
-    raw_result = _run_compiler(compiler, request, scratch)
+    # On Windows retain the exact compiler image and path through child exit;
+    # hash/stat checks alone cannot bind a later path-based process launch.
+    guard = (retained_compiler_image(str(compiler), expected_hash, MAX_COMPILER_BYTES)
+             if os.name == "nt" else nullcontext())
+    with guard:
+        raw_result = _run_compiler(compiler, request, scratch)
     if _identity(plain_path(compiler).lstat()) != _identity(info):
         raise FoundryError("build_input_changed", "Compiler executable changed during compilation.")
     if len(raw_result) > MAX_STDOUT_BYTES:

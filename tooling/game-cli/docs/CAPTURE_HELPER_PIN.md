@@ -37,3 +37,12 @@ is never executed. `test_windows_cli.py` uses a fake runner and fake observer
 to check that the pin encloses dispatch and that failed cleanup does not create
 a completion receipt. These tests do not touch or qualify the game, a real
 FFmpeg build, WGC, process admission, or gameplay.
+
+On Windows, `companion-build` also retains the selected Python compiler image
+and its path through compiler process exit, after checking its explicit hash
+and before publishing the archive. An owned compiler-file fixture verifies
+that writes and replacement are refused during its fake runner. A separate
+test built an uninstalled companion archive with a real selected Python 3.7
+compiler. The compiler's libraries and vendor identity remain outside that
+image pin. Non-Windows compiler builds retain their existing hash/stat checks;
+they do not yet obtain this Windows sharing guarantee.

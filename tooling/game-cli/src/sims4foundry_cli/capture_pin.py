@@ -82,13 +82,15 @@ def _valid_handle(value):
 
 
 @contextmanager
-def _retain(path, expected_hash, api):
+def _retain(path, expected_hash, api, *, image_basename="ffmpeg.exe", max_image_bytes=MAX_IMAGE_BYTES):
     """Private API seam for fabricated unit fixtures and Windows binding."""
     value = PureWindowsPath(path)
     if (not value.is_absolute() or len(value.drive) != 2 or value.drive[1] != ":"
             or not value.drive[0].isalpha() or len(value.parts) < 2
             or any(part in (".", "..") or ":" in part for part in value.parts[1:])
-            or value.name.casefold() != "ffmpeg.exe" or type(expected_hash) is not str
+            or (image_basename is not None and value.name.casefold() != image_basename)
+            or type(max_image_bytes) is not int or not 0 < max_image_bytes <= MAX_IMAGE_BYTES
+            or type(expected_hash) is not str
             or _HASH.fullmatch(expected_hash) is None or not api.fixed_drive(value.anchor)):
         _fail()
     handles = []
@@ -110,7 +112,7 @@ def _retain(path, expected_hash, api):
         info = api.metadata(handle)
         size = info["size"]
         if (info["attributes"] & (0x10 | 0x400) or info["links"] != 1
-                or type(size) is not int or not 0 < size <= MAX_IMAGE_BYTES):
+                or type(size) is not int or not 0 < size <= max_image_bytes):
             _fail()
         hashed, remaining = hashlib.sha256(), size
         while remaining:
@@ -137,3 +139,19 @@ def _retain(path, expected_hash, api):
 
 def retained_capture_image(path, expected_hash):
     return _retain(path, expected_hash, _WindowsApi())
+
+
+@contextmanager
+def retained_compiler_image(path, expected_hash, max_image_bytes):
+    try:
+        with _retain(path, expected_hash, _WindowsApi(), image_basename=None,
+                     max_image_bytes=max_image_bytes):
+            yield
+    except FoundryError as error:
+        if error.code == "capture_tool_identity":
+            raise FoundryError("build_compiler_identity",
+                               "Compiler image or its path could not be pinned.") from None
+        if error.code == "capture_pin_cleanup_failed":
+            raise FoundryError("build_compiler_pin_cleanup",
+                               "Compiler image pin cleanup could not be confirmed.") from None
+        raise

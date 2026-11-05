@@ -92,6 +92,23 @@ class CompanionBuildTests(unittest.TestCase):
                     self.assertEqual(build.PYC_PREFIX, archive.read(item)[:8])
         self.assertEqual([], list(self.output.parent.glob(".foundry-*")))
 
+    @unittest.skipUnless(os.name == "nt", "Windows retained compiler fixture")
+    def test_compiler_image_is_pinned_through_fake_runner(self):
+        replacement = self.root / "replacement"
+        replacement.write_bytes(b"other fixture")
+        def runner(compiler, request, scratch):
+            with self.assertRaises(PermissionError):
+                with self.compiler.open("wb"):
+                    pass
+            with self.assertRaises(PermissionError):
+                os.replace(replacement, self.compiler)
+            return self.fake_run(compiler, request, scratch)
+        with mock.patch.object(build, "_run_compiler", side_effect=runner):
+            result = self.run_build()
+        self.assertTrue(result["ok"])
+        self.assertEqual(b"fixture executable, mocked and never run", self.compiler.read_bytes())
+        self.assertEqual(b"other fixture", replacement.read_bytes())
+
     def test_build_adapters_are_in_the_exact_package_allowlist(self):
         self.assertEqual({
             'build_create', 'build_destroy', 'build_native_readers',
