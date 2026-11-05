@@ -79,8 +79,10 @@ The fixture protocol also supports `right_click` with the same fields, `drag`
 with `path` (client-coordinate pairs) and `duration_ms`, and `key` with an
 allowlisted navigation key, exact `scan_code` and `extended` boolean. The native
 sender checks the active keyboard layout before posting a key. These operations
-are covered by fabricated-provider tests only; they are not game-qualified and
-remain subject to the same single pending input gate.
+remain subject to the same single pending input gate. In addition to fabricated
+provider tests, separate owned-window WGC fixtures received the expected drag
+message sequence and a Tab down/up sequence. These checks do not establish
+delivery or behavior in Sims, UI semantics, or action causality.
 
 `recover_frame_binding` accepts the original `request_id`; `capture_frame`
 also accepts a new `evidence_directory`. Both use the still-retained sender and

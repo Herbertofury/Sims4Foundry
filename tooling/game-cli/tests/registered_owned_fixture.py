@@ -89,9 +89,22 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
             registry.open_session('1'*32,registered_input.journal_binding(journal))
             if os.environ.get('FOUNDRY_WGC_LIVE_SERVICE_TEST') == '1':
                 intent = {'session_id':'1'*32,'identity':target}
+                action = os.environ.get('FOUNDRY_WGC_ACTION','click')
+                common = {'request_id':'3'*32,'expectation':{'fixture':'test'},
+                          'evidence_directory':str(root/'frame-evidence')}
+                if action == 'drag':
+                    command = dict(common,op='drag',path=[[20,30],[40,50]],duration_ms=50)
+                    expected_messages = [0x0201,0x0200,0x0202]
+                elif action == 'key':
+                    mapping = api.mapping(0x09,api.layout(thread_id))
+                    test.assertTrue(type(mapping) is int and 0 < (mapping & 255) <= 255 and (mapping >> 8) in (0,0xe0))
+                    command = dict(common,op='key',key='TAB',scan_code=mapping & 255,extended=bool(mapping >> 8))
+                    expected_messages = [0x0100,0x0101]
+                else:
+                    command = dict(common,op='click',x=20,y=30)
+                    expected_messages = [0x0201,0x0202]
                 commands = [
-                    {'op':'click','request_id':'3'*32,'x':20,'y':30,'expectation':{'fixture':'white'},
-                     'evidence_directory':str(root/'frame-evidence')},
+                    command,
                     {'op':'input_status','request_id':'3'*32},
                     {'op':'stop','abandon':True}]
                 source = io.BytesIO(b''.join(json.dumps(command).encode()+b'\n' for command in commands))
@@ -107,8 +120,8 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                 test.assertEqual('awaiting_readback',rows[2]['input']['state'])
                 test.assertEqual('owner_stopped',result['outcome'])
                 deadline=time.monotonic()+12
-                while len(state['events']) < 2 and time.monotonic() < deadline: time.sleep(.05)
-                test.assertEqual(2,len(state['events']))
+                while len(state['events']) < len(expected_messages) and time.monotonic() < deadline: time.sleep(.05)
+                test.assertEqual(expected_messages,[event[0] for event in state['events']])
                 test.assertFalse(rows[1]['acknowledged'])
                 return
             provider = RetainedProcessRegistry(process_api,lambda view:True)

@@ -59,7 +59,12 @@ class WgcOwnedWindowTests(unittest.TestCase):
         state={'window':None,'error':None,'clicked':False,'events':[],'destroyed':True,'unregistered':True}
         @WNDPROC
         def callback(hwnd,message,wparam,lparam):
-            if message in (int(Message.LEFT_DOWN),int(Message.LEFT_UP)):
+            tracked = (Message.LEFT_DOWN,Message.LEFT_UP)
+            if os.environ.get('FOUNDRY_WGC_ACTION') == 'drag':
+                tracked = (Message.LEFT_DOWN,Message.MOUSE_MOVE,Message.LEFT_UP)
+            elif os.environ.get('FOUNDRY_WGC_ACTION') == 'key':
+                tracked = (Message.KEY_DOWN,Message.KEY_UP)
+            if message in tuple(int(item) for item in tracked):
                 state['events'].append((message,int(wparam),int(lparam)))
             if message == int(Message.LEFT_UP):
                 state['clicked']=True
