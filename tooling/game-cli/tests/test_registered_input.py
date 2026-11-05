@@ -111,6 +111,14 @@ class RegisteredInputTests(unittest.TestCase):
         with self.assertRaises(FoundryError): wrapped.post(100, self.packets[0])
         with self.assertRaises(FoundryError): wrapped.post(100, self.packets[-1])
         self.assertEqual([], self.backend.posts)
+    def test_live_backend_subclass_is_refused_before_dispatch(self):
+        class UnqualifiedSubclass(live_input.LiveInputBackend):
+            pass
+        backend = UnqualifiedSubclass(identity(),self.packets,'ffmpeg.exe','a'*64)
+        with self.assertRaises(FoundryError) as error:
+            registered_input._WitnessBoundBackend(backend, lambda:True, 100, self.packets)
+        self.assertEqual('unsupported_backend', error.exception.code)
+        self.assertEqual([], self.backend.posts)
     def test_lost_down_reply_still_allows_one_original_release(self):
         def lose_down(packet):
             if not packet.release_intent: raise OSError('lost downstream reply')

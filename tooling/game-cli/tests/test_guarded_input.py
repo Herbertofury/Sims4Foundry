@@ -56,6 +56,27 @@ class GuardedInputTests(unittest.TestCase):
         self.assertEqual('unresolved', result['outcome'])
         self.assertEqual([Message.LEFT_DOWN], [packet.message for _,packet in self.backend.posts])
 
+    def test_context_callback_mutation_does_not_change_dispatch_plan(self):
+        original = self.click[0].lparam
+        def mutate(packet):
+            object.__setattr__(packet, 'lparam', (40 << 16) | 40)
+            return True
+        self.backend.verify_input_context = mutate
+        result = self.run_sequence()
+        self.assertEqual('queue_only', result['outcome'])
+        self.assertEqual([original,original], [packet.lparam for _,packet in self.backend.posts])
+
+    def test_post_callback_mutation_does_not_change_later_release(self):
+        original = self.click[0].lparam
+        def mutate(packet):
+            if packet.message is Message.LEFT_DOWN:
+                object.__setattr__(packet, 'lparam', (40 << 16) | 40)
+            return True
+        self.backend.failure = mutate
+        result = self.run_sequence()
+        self.assertEqual('queue_only', result['outcome'])
+        self.assertEqual(original, self.backend.posts[-1][1].lparam)
+
     def test_caller_and_audit_target_mutations_cannot_change_owned_binding(self):
         for target_kind in ("caller", "audit"):
             for stage in ("before_dispatch", "after_down"):

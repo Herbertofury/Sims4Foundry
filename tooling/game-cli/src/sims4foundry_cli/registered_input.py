@@ -47,6 +47,8 @@ def _check(registry, journal):
 
 class _WitnessBoundBackend:
     def __init__(self, backend, check_live, hwnd, packets):
+        if isinstance(backend, LiveInputBackend) and type(backend) is not LiveInputBackend:
+            raise FoundryError('unsupported_backend', 'Live input subclasses require a separately qualified release contract.')
         self._backend, self._check_live = backend, check_live
         self._held = False
         self._hwnd = hwnd
@@ -107,10 +109,11 @@ def execute_once(registry, journal, request_id, packets, backend, *, expected_ob
     if type(witness) is not SessionWitness:
         raise FoundryError('witness_binding', 'The original retained session witness is required.')
     with witness.guard_for_dispatch(registry) as check_live:
+        wrapped = _WitnessBoundBackend(backend, check_live, target['hwnd'], packets)
         registry.begin(request_id, 'input', expected_hash)
         # Any failure, including one before native dispatch, leaves the shared
         # gate unresolved. A fresh handle check immediately precedes each post.
-        result = journal.execute_once(request_id, packets, _WitnessBoundBackend(backend, check_live, target['hwnd'], packets),
+        result = journal.execute_once(request_id, packets, wrapped,
                                       expected_observation=expectation)
     if result.get('intent_sha256') != expected_hash:
         raise FoundryError('registry_binding', 'Journal returned a different intent; do not replay.')

@@ -19,6 +19,11 @@ from .windows import validate_identity, same_identity
 OWNERSHIP = ("pid", "creation_filetime", "executable", "executable_sha256", "hwnd", "thread_id", "window_class")
 
 
+def _copy_packet(packet):
+    return InputPacket(packet.message, packet.wparam, packet.lparam, packet.offset_ms,
+                       packet.coordinate_space, packet.release_intent)
+
+
 def _validate_sequence(packets, expected):
     if type(packets) is not tuple or not 1 <= len(packets) <= MAX_DRAG_POINTS + 1 or any(type(p) is not InputPacket for p in packets):
         raise FoundryError("invalid_sequence", "Expected a bounded immutable packet sequence.")
@@ -66,6 +71,8 @@ def run_packets(expected, packets, backend, journal):
     Backend methods: observe(), observe_owned(), integrities(), foreground(),
     verify_recording()->True, verify_input_context(packet)->True,
     post(hwnd, packet)->bool, monotonic(), sleep(seconds).
+    An optional prepare_release(packet) must be in-memory and returns an exact
+    release from the original packet plan; it cannot select another target.
     Input context must verify the current key/scan/layout mapping and actual
     modifier state; construction alone is not verification.
     Observe methods return identity dicts; owned observation may omit geometry.
@@ -74,7 +81,7 @@ def run_packets(expected, packets, backend, journal):
     Up precedes its flush, even if recorder/viewport/foreground checks fail.
     Release still requires original ownership and equal known integrity; losing
     either leaves release unresolved, never authorizes a weaker fallback.
-    Target copies prevent accidental aliasing, not arbitrary trusted-Python access.
+    Packet and target copies prevent callback aliasing, not arbitrary trusted-Python access.
     Every backend call must be bounded; this pure runner cannot supervise a
     stalled native backend or guarantee cleanup after process termination.
     """
@@ -124,7 +131,7 @@ def run_packets(expected, packets, backend, journal):
             if prepare is not None:
                 # The optional in-memory adapter returns the last point actually
                 # attempted by its native sender. It must perform no OS or disk I/O.
-                packet = prepare(packet)
+                packet = prepare(_copy_packet(packet))
                 if (type(packet) is not InputPacket or
                         (release.coordinate_space is CoordinateSpace.NONE and packet != release) or
                         (release.coordinate_space is not CoordinateSpace.NONE and
@@ -132,7 +139,7 @@ def run_packets(expected, packets, backend, journal):
                           or packet != replace(release, lparam=packet.lparam)))):
                     raise FoundryError("invalid_release", "Prepared release differs from the original packet plan.")
             # No recorder, viewport, sleep, timing or optional disk operations here.
-            accepted = backend.post(expected["hwnd"], packet)
+            accepted = backend.post(expected["hwnd"], _copy_packet(packet))
             events.append({"message": int(packet.message), "release": True, "accepted": accepted is True})
             if accepted is not True:
                 raise FoundryError("release_unresolved", "Original release was not accepted; do not replay it blindly.")
@@ -142,7 +149,7 @@ def run_packets(expected, packets, backend, journal):
     # Failure in preflight or intent persistence occurs before any post.
     current()
     for packet in packets:
-        if not packet.release_intent and backend.verify_input_context(packet) is not True:
+        if not packet.release_intent and backend.verify_input_context(_copy_packet(packet)) is not True:
             raise FoundryError("input_context_unverified", "Key/layout and actual modifier state must be explicitly verified.")
     journal({"state": "dispatch_intent", "packet_count": len(packets), "target": deepcopy(expected),
              "packets": [{"message": int(p.message), "wparam": p.wparam, "lparam": p.lparam,
@@ -168,14 +175,14 @@ def run_packets(expected, packets, backend, journal):
             # Persistence can stall or permit user/recorder changes. Recheck after
             # it, immediately before the native sender's own leased post check.
             current()
-            if backend.verify_input_context(packet) is not True:
+            if backend.verify_input_context(_copy_packet(packet)) is not True:
                 raise FoundryError("input_context_unverified", "Key/layout or modifier state changed before the next packet.")
             # A thrown call can follow queue acceptance. Preserve release obligation.
             if packet.message in (Message.LEFT_DOWN, Message.RIGHT_DOWN, Message.KEY_DOWN):
                 armed = True
             last_point = packet.lparam
             attempted = True
-            accepted = backend.post(expected["hwnd"], packet)
+            accepted = backend.post(expected["hwnd"], _copy_packet(packet))
             if accepted is False and packet.message in (Message.LEFT_DOWN, Message.RIGHT_DOWN, Message.KEY_DOWN):
                 armed = False  # explicit native refusal, not a lost/unknown result
             if accepted is not True:
