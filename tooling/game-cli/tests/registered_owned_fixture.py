@@ -35,11 +35,8 @@ _OWNED_UNRESOLVED = []
 def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
     api = native_input._NativeApi()
     process_api = process_exit._WindowsApi()
-    handle = process_api.open(os.getpid())
-    try:
-        image, created = process_api.identity(handle)
-    finally:
-        process_api.close(handle)
+    # The current-process pseudo-handle needs no acquisition or close.
+    image, created = process_api.identity(api._current_process())
     expected_image = str(Path(sys.executable).resolve())
     test.assertTrue(process_exit._same_image(image, expected_image))
     with open(expected_image,'rb') as stream:
