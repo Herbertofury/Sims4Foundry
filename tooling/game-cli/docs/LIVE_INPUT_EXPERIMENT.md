@@ -11,6 +11,11 @@ recorder loss, target ownership change and the single original release attempt.
 An additional Windows test sends the actual allowlisted `PostMessageW` packets
 to an owned hidden message-only window and observes their delivery there. It
 does not launch or interact with the game and does not qualify game input.
+An opt-in Windows test also captured an owned, briefly visible window through
+the real pinned FFmpeg WGC stream, sent it native click packets and observed
+the fixture repaint in a later frame. It requires explicit
+`FOUNDRY_WGC_TEST_FFMPEG` and `FOUNDRY_WGC_TEST_SHA256` values and controls only
+its own fixture window and recorder. Neither test qualifies Sims behavior.
 
 This is not yet a supported CLI operation or game-qualified provider. A native
 queue acceptance is not delivery, state transition or semantic success. The

@@ -28,24 +28,20 @@ class OwnedWin32PostTests(unittest.TestCase):
         create = bind(user,'CreateWindowExW',wt.HWND,[wt.DWORD,wt.LPCWSTR,wt.LPCWSTR,wt.DWORD,
                       ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wt.HWND,wt.HMENU,wt.HINSTANCE,ctypes.c_void_p])
         default = bind(user,'DefWindowProcW',ctypes.c_ssize_t,[wt.HWND,wt.UINT,wt.WPARAM,wt.LPARAM])
-        get_message = bind(user,'GetMessageW',ctypes.c_int,[ctypes.POINTER(wt.MSG),wt.HWND,wt.UINT,wt.UINT])
+        peek_message = bind(user,'PeekMessageW',wt.BOOL,[ctypes.POINTER(wt.MSG),wt.HWND,wt.UINT,wt.UINT,wt.UINT])
         translate = bind(user,'TranslateMessage',wt.BOOL,[ctypes.POINTER(wt.MSG)])
         dispatch = bind(user,'DispatchMessageW',ctypes.c_ssize_t,[ctypes.POINTER(wt.MSG)])
-        quit_message = bind(user,'PostQuitMessage',None,[ctypes.c_int])
         destroy = bind(user,'DestroyWindow',wt.BOOL,[wt.HWND])
         unregister = bind(user,'UnregisterClassW',wt.BOOL,[wt.LPCWSTR,wt.HINSTANCE])
-        post = bind(user,'PostMessageW',wt.BOOL,[wt.HWND,wt.UINT,wt.WPARAM,wt.LPARAM])
         name = 'FoundryOwnedFixture' + uuid.uuid4().hex
-        ready, done = threading.Event(), threading.Event()
+        ready, done, stop = threading.Event(), threading.Event(), threading.Event()
+        lifetime_lock = threading.Lock()
         state = {'window':None, 'error':None, 'events':[]}
         @WNDPROC
         def callback(hwnd, message, wparam, lparam):
             if message in (int(Message.LEFT_DOWN),int(Message.LEFT_UP)):
                 state['events'].append((message,int(wparam),int(lparam)))
-                if message == int(Message.LEFT_UP): quit_message(0)
-                return 0
-            if message == 0x0010:  # WM_CLOSE only for this owned fixture
-                quit_message(0)
+                if message == int(Message.LEFT_UP): stop.set()
                 return 0
             return default(hwnd,message,wparam,lparam)
         def owner():
@@ -60,15 +56,18 @@ class OwnedWin32PostTests(unittest.TestCase):
                 state['window'] = int(hwnd)
                 ready.set()
                 msg = wt.MSG()
-                while get_message(ctypes.byref(msg),None,0,0) > 0:
-                    translate(ctypes.byref(msg)); dispatch(ctypes.byref(msg))
+                while not stop.is_set():
+                    while peek_message(ctypes.byref(msg),None,0,0,1):
+                        translate(ctypes.byref(msg)); dispatch(ctypes.byref(msg))
+                    stop.wait(.01)
             except Exception as error:
                 state['error'] = error
                 ready.set()
             finally:
-                if hwnd: destroy(hwnd)
-                if registered: unregister(name,instance)
-                done.set()
+                with lifetime_lock:
+                    if hwnd: destroy(hwnd)
+                    if registered: unregister(name,instance)
+                    done.set()
         thread = threading.Thread(target=owner,daemon=True)
         thread.start()
         try:
@@ -76,13 +75,14 @@ class OwnedWin32PostTests(unittest.TestCase):
             if state['error']: raise state['error']
             packets = encode_click(Point(20,30),ClientBounds(500,500))
             native = _NativeApi()
-            for packet in packets:
-                self.assertIs(native.post(state['window'],packet), True)
+            with lifetime_lock:
+                self.assertFalse(done.is_set(), 'Owned window already stopped')
+                for packet in packets:
+                    self.assertIs(native.post(state['window'],packet), True)
             self.assertTrue(done.wait(5), 'Owned window did not receive both messages')
             self.assertEqual([(int(p.message),p.wparam,p.lparam) for p in packets],state['events'])
         finally:
-            if not done.is_set() and state['window']:
-                post(state['window'],0x0010,0,0)
+            stop.set()
             thread.join(timeout=5)
         self.assertFalse(thread.is_alive(), 'Owned fixture window did not stop')
 
