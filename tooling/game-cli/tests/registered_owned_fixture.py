@@ -56,7 +56,12 @@ def _fixture_parent(path):
     return parent
 
 
-def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
+def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash, require_isolation=lambda _:None):
+    require_isolation(hwnd)
+    session_id, witness_id, first_id, second_id = (uuid.uuid4().hex for _ in range(4))
+    test.assertEqual(4,len({session_id,witness_id,first_id,second_id}))
+    test.assertFalse({session_id,witness_id,first_id,second_id}.intersection(
+        {'1'*32,'2'*32,'3'*32,'4'*32}))
     api = native_input._NativeApi()
     process_api = process_exit._WindowsApi()
     # The current-process pseudo-handle needs no acquisition or close.
@@ -101,16 +106,16 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
             for module in (windows,input_journal,session_registry,guarded_input,wgc_recorder):
                 stack.enter_context(mock.patch.object(module,'validate_identity',side_effect=validate_owned))
             stack.enter_context(mock.patch.object(windows,'inspect',side_effect=inspect_owned))
-            journal = input_journal.InputJournal.create(root/'journal','1'*32,target)
+            journal = input_journal.InputJournal.create(root/'journal',session_id,target)
             registry_dir = root/'registry'; registry_dir.mkdir()
             anchor = SQLiteAnchor.create(root/'anchor.sqlite')
             key = windows_registry_key.create_key(root/'registry-key.json',digest(session_registry._lifetime(target)))
             registry = session_registry.SessionRegistry(registry_dir,target,key,anchor)
-            registry.open_session('1'*32,registered_input.journal_binding(journal))
+            registry.open_session(session_id,registered_input.journal_binding(journal))
             if os.environ.get('FOUNDRY_WGC_LIVE_SERVICE_TEST') == '1':
-                intent = {'session_id':'1'*32,'identity':target}
+                intent = {'session_id':session_id,'identity':target}
                 action = os.environ.get('FOUNDRY_WGC_ACTION','click')
-                common = {'request_id':'3'*32,'expectation':{'fixture':'test'},
+                common = {'request_id':first_id,'expectation':{'fixture':'test'},
                           'evidence_directory':str(root/'frame-evidence')}
                 if action == 'drag':
                     command = dict(common,op='drag',path=[[20,30],[40,50]],duration_ms=50)
@@ -129,7 +134,7 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                     expected_messages = [0x0201,0x0202]
                 commands = [
                     command,
-                    {'op':'input_status','request_id':'3'*32},
+                    {'op':'input_status','request_id':first_id},
                     {'op':'stop','abandon':True}]
                 source = io.BytesIO(b''.join(json.dumps(command).encode()+b'\n' for command in commands))
                 sink = io.StringIO()
@@ -137,7 +142,7 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                       mock.patch.object(independent_live_service.independent_session,'_open',
                                         return_value=(intent,registry,journal,registry.inspect()))):
                     global_lifetime_authority.initialize()
-                    result = independent_live_service.serve(root/'unused-authority',root,'2'*32,ffmpeg,ffmpeg_hash,
+                    result = independent_live_service.serve(root/'unused-authority',root,witness_id,ffmpeg,ffmpeg_hash,
                                                             input_stream=source,output_stream=sink,
                                                             _fixture_admission=independent_live_service._OWNED_FIXTURE_ADMISSION)
                 rows = [json.loads(line) for line in sink.getvalue().splitlines()]
@@ -152,7 +157,7 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                 return
             provider = RetainedProcessRegistry(process_api,lambda view:True)
             process_identity={key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
-            witness=SessionWitness(registry,provider,process_identity,'2'*32)
+            witness=SessionWitness(registry,provider,process_identity,witness_id)
             retained = [provider,None,str(root),None,hwnd]
             _OWNED_UNRESOLVED.append(retained)
             lease=witness.acquire()
@@ -164,7 +169,8 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                     owner = independent_live_owner.LiveOwner(registry,journal,witness,ffmpeg,ffmpeg_hash,
                                   _fixture_admission=independent_live_owner._OWNED_FIXTURE_ADMISSION)
                     retained[3] = owner
-                    result = owner.click_once('3'*32,20,30,expected_observation={'fixture':'white'},
+                    require_isolation(hwnd)
+                    result = owner.click_once(first_id,20,30,expected_observation={'fixture':'white'},
                                               evidence_directory=root/'frame-evidence')
                     if result.get('outcome') != 'frame_recorded':
                         print('Owned input diagnostic:',diagnostics[-1] if diagnostics else 'no_runner_exception',flush=True)
@@ -174,11 +180,11 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                     while len(state['events']) < 2 and time.monotonic() < deadline:
                         time.sleep(.05)
                     test.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],state['events'])
-                    test.assertEqual('awaiting_readback',journal.status('3'*32)['state'])
-                    observed = input_frame_evidence.inspect(journal,'3'*32,root/'frame-evidence')
+                    test.assertEqual('awaiting_readback',journal.status(first_id)['state'])
+                    observed = input_frame_evidence.inspect(journal,first_id,root/'frame-evidence')
                     test.assertEqual('matching_files_observed',observed['state'])
                     with test.assertRaises(FoundryError):
-                        owner.click_once('3'*32,20,30,expected_observation={'fixture':'white'},
+                        owner.click_once(first_id,20,30,expected_observation={'fixture':'white'},
                                          evidence_directory=root/'different-evidence')
                     test.assertEqual(2,len(state['events']))
                     if os.environ.get('FOUNDRY_WGC_OWNER_SEQUENCE_TEST') == '1':
@@ -190,15 +196,16 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                             test.assertEqual(target['hwnd'],selected['hwnd'])
                             return dict(view,evidence_sha256=digest({'events':state['events']}),
                                         observation=expectation)
-                        completion = owner.fixture_complete_step('3'*32,observe)
+                        completion = owner.fixture_complete_step(first_id,observe)
                         test.assertEqual('ready',completion['completion_state'])
                         with test.assertRaises(FoundryError):
-                            owner.click_once('4'*32,40,50,expected_observation={'fixture':'second'},
+                            owner.click_once(second_id,40,50,expected_observation={'fixture':'second'},
                                              evidence_directory=root/'second-frame')
-                        inspected = owner.fixture_completion_snapshot('3'*32)
+                        inspected = owner.fixture_completion_snapshot(first_id)
                         test.assertEqual('confirmed',owner.fixture_confirm_completion(
-                            '3'*32,inspected['completion_token'])['completion_state'])
-                        second = owner.click_once('4'*32,40,50,expected_observation={'fixture':'second'},
+                            first_id,inspected['completion_token'])['completion_state'])
+                        require_isolation(hwnd)
+                        second = owner.click_once(second_id,40,50,expected_observation={'fixture':'second'},
                                                   evidence_directory=root/'second-frame')
                         test.assertEqual('frame_recorded',second['outcome'])
                         second_packets = encode_click(Point(40,50),ClientBounds(target['client_width'],target['client_height']))
@@ -206,18 +213,18 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                         while len(state['events']) < 4 and time.monotonic() < deadline: time.sleep(.05)
                         test.assertEqual(expected_events + [(int(packet.message),packet.wparam,packet.lparam)
                                                             for packet in second_packets],state['events'])
-                        test.assertEqual('awaiting_readback',journal.status('4'*32)['state'])
+                        test.assertEqual('awaiting_readback',journal.status(second_id)['state'])
                         test.assertFalse(second['semantic_state_verified'])
                         test.assertFalse(second['game_qualified'])
                     test.assertEqual('sender_cleanup_reported',owner.close_sender()['outcome'])
                 else:
-                    run_original(test,registry,journal,witness,packets,target,ffmpeg,ffmpeg_hash,state,root)
+                    run_original(test,registry,journal,witness,packets,target,ffmpeg,ffmpeg_hash,state,root,first_id)
                 result=lease.close()
                 closed = result.get('outcome') == 'provider_reported_closed'
                 test.assertTrue(closed)
                 _OWNED_UNRESOLVED.remove(retained)
                 new_json(root/'fixture-outcome.json',{'schema':1,'journal_state':'awaiting_readback',
-                         'request_id':('4' if os.environ.get('FOUNDRY_WGC_OWNER_SEQUENCE_TEST') == '1' else '3')*32,'capture_time_verified':False,'game_qualified':False})
+                         'request_id':(second_id if os.environ.get('FOUNDRY_WGC_OWNER_SEQUENCE_TEST') == '1' else first_id),'capture_time_verified':False,'game_qualified':False})
             finally:
                 # An uncertain witness close is never retried.
                 if not closed:
@@ -228,13 +235,13 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
         print('Owned fixture evidence directory name: ' + root.name,flush=True)
 
 
-def run_original(test,registry,journal,witness,packets,target,ffmpeg,ffmpeg_hash,state,root):
+def run_original(test,registry,journal,witness,packets,target,ffmpeg,ffmpeg_hash,state,root,first_id):
     with live_input.LiveInputBackend(target,packets,ffmpeg,ffmpeg_hash) as backend:
         before = backend._recorder.sample()
         region = (before.width//2,before.height//2,1,1)
         _, pixel = _pixels(before.png,region)
         test.assertTrue(all(value <= 10 for value in pixel[:3]))
-        result=registered_input.execute_once(registry,journal,'3'*32,packets,backend,
+        result=registered_input.execute_once(registry,journal,first_id,packets,backend,
                                              expected_observation={'fixture':'white'},witness=witness)
         test.assertEqual('awaiting_readback',result['state'])
         test.assertFalse(result['result']['semantic_success'])
@@ -252,14 +259,14 @@ def run_original(test,registry,journal,witness,packets,target,ffmpeg,ffmpeg_hash
             time.sleep(.05)
         test.assertIsNotNone(changed,'No expected white fixture pixel was received')
         test.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],state['events'])
-        evidence=input_frame_evidence.capture(journal,'3'*32,backend,root/'frame-evidence')
+        evidence=input_frame_evidence.capture(journal,first_id,backend,root/'frame-evidence')
         test.assertEqual('frame_recorded',evidence['outcome'])
         test.assertFalse(evidence['capture_time_verified'])
         test.assertFalse(evidence['acknowledged'])
-        observed = input_frame_evidence.inspect(journal,'3'*32,root/'frame-evidence')
+        observed = input_frame_evidence.inspect(journal,first_id,root/'frame-evidence')
         test.assertEqual('matching_files_observed',observed['state'])
         image = root/'frame-evidence'/'frame.png'
-        compared = input_frame_evidence.compare(journal,'3'*32,root/'frame-evidence',observed['frame_sha256'],
+        compared = input_frame_evidence.compare(journal,first_id,root/'frame-evidence',observed['frame_sha256'],
                     observed['evidence_intent_sha256'],image,observed['frame_sha256'],(0,0,changed.width,changed.height))
         test.assertTrue(compared['matched'])
         test.assertFalse(compared['capture_time_verified'])

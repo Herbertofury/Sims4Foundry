@@ -7,6 +7,7 @@ import threading
 import time
 import unittest
 import uuid
+from unittest import mock
 
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Message, Point, encode_click
@@ -27,6 +28,24 @@ def _stop_or_retain(thread, stop, state, unresolved):
     return not thread.is_alive() and state['destroyed'] and state['unregistered']
 
 
+def _ensure_distinct_fixture(hwnd):
+    """Compare recorded values only; never query or operate on the old process."""
+    if os.environ.get('FOUNDRY_WGC_OWNER_SEQUENCE_TEST') != '1':
+        return
+    if (os.environ.get('FOUNDRY_WGC_REGISTERED_TEST') != '1'
+            or os.environ.get('FOUNDRY_WGC_LIVE_OWNER_TEST') != '1'
+            or os.environ.get('FOUNDRY_WGC_LIVE_SERVICE_TEST') == '1'
+            or os.environ.get('FOUNDRY_WGC_TEE_PROBE') == '1'):
+        raise FoundryError('fixture_isolation', 'The registered owner sequence fixture must be selected exactly.')
+    old_pid = os.environ.get('FOUNDRY_WGC_PREVIOUS_PID','')
+    old_hwnd = os.environ.get('FOUNDRY_WGC_PREVIOUS_HWND','')
+    if (not old_pid.isascii() or not old_pid.isdecimal() or not old_hwnd.isascii()
+            or not old_hwnd.isdecimal() or int(old_pid) <= 0 or int(old_hwnd) <= 0
+            or type(hwnd) is not int or hwnd <= 0 or os.getpid() == int(old_pid)
+            or hwnd == int(old_hwnd)):
+        raise FoundryError('fixture_isolation', 'A new process and window distinct from the original fixture are required.')
+
+
 def _fixture_service_retentions(entries, hwnd):
     result = []
     for item in entries:
@@ -36,6 +55,20 @@ def _fixture_service_retentions(entries, hwnd):
 
 
 class WgcFixtureOwnershipTests(unittest.TestCase):
+    def test_sequence_fixture_requires_distinct_recorded_process_and_window(self):
+        env = {'FOUNDRY_WGC_OWNER_SEQUENCE_TEST':'1', 'FOUNDRY_WGC_REGISTERED_TEST':'1',
+               'FOUNDRY_WGC_LIVE_OWNER_TEST':'1', 'FOUNDRY_WGC_PREVIOUS_PID':'17',
+               'FOUNDRY_WGC_PREVIOUS_HWND':'25'}
+        with mock.patch.dict(os.environ,env), mock.patch.object(os,'getpid',return_value=18):
+            _ensure_distinct_fixture(26)
+            with self.assertRaises(FoundryError): _ensure_distinct_fixture(25)
+            with mock.patch.object(os,'getpid',return_value=17):
+                with self.assertRaises(FoundryError): _ensure_distinct_fixture(26)
+            with mock.patch.dict(os.environ,{'FOUNDRY_WGC_PREVIOUS_HWND':''}):
+                with self.assertRaises(FoundryError): _ensure_distinct_fixture(26)
+            with mock.patch.dict(os.environ,{'FOUNDRY_WGC_LIVE_SERVICE_TEST':'1'}):
+                with self.assertRaises(FoundryError): _ensure_distinct_fixture(26)
+
     def test_service_retention_uses_original_or_unknown_window_binding(self):
         rows = _fixture_service_retentions([{'fixture_hwnd':123},{'fixture_hwnd':456}, {}, None],123)
         self.assertEqual([{'hwnd':123},{'hwnd':456},{'hwnd':123},{'hwnd':123}],rows)
@@ -146,6 +179,7 @@ class WgcOwnedWindowTests(unittest.TestCase):
             if state['error']: raise state['error']
             with lifetime_lock:
                 self.assertFalse(done.is_set(),'Owned capture window already stopped')
+                _ensure_distinct_fixture(state['window'])
                 if os.environ.get('FOUNDRY_WGC_TEE_PROBE') == '1':
                     from wgc_tee_probe import run_owned
                     run_owned(self,state['window'],state,invalidate,
@@ -178,7 +212,7 @@ class WgcOwnedWindowTests(unittest.TestCase):
                     self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
                     from registered_owned_fixture import run_owned
                     run_owned(self,state['window'],name,state,os.environ['FOUNDRY_WGC_TEST_FFMPEG'],
-                              os.environ['FOUNDRY_WGC_TEST_SHA256'])
+                              os.environ['FOUNDRY_WGC_TEST_SHA256'],_ensure_distinct_fixture)
                 else:
                     # The ordinary opt-in fixture checks raw posting plus WGC.
                     native = _NativeApi()

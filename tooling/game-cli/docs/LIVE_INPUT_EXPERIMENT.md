@@ -171,3 +171,12 @@ resources remain unresolved. For the service fixture it also correlates an
 unresolved service entry with the original fixture HWND; an unavailable binding
 retains the window conservatively. In-process retention does not survive process
 exit or prove that a child or OS handle has closed.
+
+For a separately coordinated later sequence test, the fixture requires the
+recorded prior PID and HWND through `FOUNDRY_WGC_PREVIOUS_PID` and
+`FOUNDRY_WGC_PREVIOUS_HWND` and refuses a matching new PID or HWND. It compares
+only supplied values and does not query, signal, or clean the prior process.
+Each registered fixture now generates fresh session, witness, and request IDs.
+The check runs before capture and before each owned input. Different values do
+not establish that an earlier helper exited or that it cannot consume shared
+resources; in-process quarantine still ends with its owner process.
