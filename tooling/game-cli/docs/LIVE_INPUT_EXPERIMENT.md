@@ -13,9 +13,16 @@ to an owned hidden message-only window and observes their delivery there. It
 does not launch or interact with the game and does not qualify game input.
 An opt-in Windows test also captured an owned, briefly visible window through
 the real pinned FFmpeg WGC stream, sent it native click packets and observed
-the fixture repaint in a later frame. It requires explicit
+the matching down/up sequence plus the expected black-to-white center pixel in
+a later received frame. It does not exclude other input or establish that the
+frame was captured after the click; receipt time is not proof of capture time.
+The test requires explicit
 `FOUNDRY_WGC_TEST_FFMPEG` and `FOUNDRY_WGC_TEST_SHA256` values and controls only
 its own fixture window and recorder. Neither test qualifies Sims behavior.
+Recorder startup with an unknown child-creation outcome and unsuccessful
+cleanup retain the original recorder and pin in an in-process quarantine. An
+uncertain cleanup is not silently repeated or reported as complete; process
+termination ends that in-memory ownership and is not restart recovery.
 
 This is not yet a supported CLI operation or game-qualified provider. A native
 queue acceptance is not delivery, state transition or semantic success. The

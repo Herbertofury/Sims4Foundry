@@ -147,11 +147,31 @@ class RecorderTests(unittest.TestCase):
         self.recorder._worker.join(timeout=1)
         self.assertFalse(self.recorder._worker.is_alive())
         with self.assertRaises(FoundryError): self.recorder.sample()
-    def test_start_failure_releases_pin_without_replay(self):
+    def test_unconfirmed_spawn_retains_pin_without_replay(self):
         self.recorder._popen = mock.Mock(side_effect=OSError('fixture failure'))
+        with self.assertRaises(FoundryError) as error: self.recorder.start()
+        self.assertEqual('recording_cleanup_unresolved', error.exception.code)
+        self.assertTrue(self.pinned)
         with self.assertRaises(FoundryError): self.recorder.start()
-        self.assertFalse(self.pinned)
-        with self.assertRaises(FoundryError): self.recorder.start()
+        self.assertEqual(1,self.recorder._popen.call_count)
+        with recorder._QUARANTINE_LOCK:
+            self.assertIn(self.recorder,recorder._QUARANTINE)
+            recorder._QUARANTINE.discard(self.recorder)
+        # The test knows this fake never created a process; production does not.
+        self.recorder._pin.__exit__(None,None,None)
+        self.recorder._pin_active = False
+    def test_empty_spawn_result_is_unresolved_and_retains_pin(self):
+        self.recorder._popen = mock.Mock(return_value=None)
+        with self.assertRaises(FoundryError) as error: self.recorder.start()
+        self.assertEqual('recording_cleanup_unresolved', error.exception.code)
+        self.assertTrue(self.pinned)
+        self.assertFalse(self.recorder.close())
+        self.assertEqual(1,self.recorder._popen.call_count)
+        with recorder._QUARANTINE_LOCK:
+            self.assertIn(self.recorder,recorder._QUARANTINE)
+            recorder._QUARANTINE.discard(self.recorder)
+        self.recorder._pin.__exit__(None,None,None)  # known synthetic provider
+        self.recorder._pin_active = False
     def test_late_spawn_is_retired_after_start_timeout(self):
         gate=threading.Event()
         def late(*args,**kwargs):
@@ -182,6 +202,26 @@ class RecorderTests(unittest.TestCase):
         self.assertFalse(self.recorder.close())
         self.assertFalse(self.recorder.close())
         self.assertEqual([1],calls)
+        with recorder._QUARANTINE_LOCK:
+            recorder._QUARANTINE.discard(self.recorder)  # synthetic fixture only
+    def test_uncertain_child_cleanup_is_retained_and_not_repeated(self):
+        calls=[]
+        def uncertain():
+            calls.append(1)
+            raise OSError('lost child termination acknowledgement')
+        self.proc.terminate = uncertain
+        self.recorder.start()
+        self.assertFalse(self.recorder.close())
+        self.assertFalse(self.recorder.close())
+        self.assertEqual([1], calls)
+        with recorder._QUARANTINE_LOCK:
+            self.assertIn(self.recorder, recorder._QUARANTINE)
+        # Synthetic process/pipe only: retire fixture resources for the test.
+        self.proc.code = 0
+        self.proc.stdout.close()
+        self.recorder._worker.join(timeout=1)
+        with recorder._QUARANTINE_LOCK:
+            recorder._QUARANTINE.discard(self.recorder)
     def test_wrong_thread_does_not_start_helper(self):
         errors=[]
         def other():

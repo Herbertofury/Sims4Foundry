@@ -25,6 +25,20 @@ MAX_FRAME_AGE = 1.0
 START_TIMEOUT = 5.0
 CLEANUP_TIMEOUT = 2.0
 _SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_QUARANTINE = set()
+_QUARANTINE_LOCK = threading.Lock()
+
+
+def _retain_unresolved(recorder):
+    # Strong ownership prevents finalization from releasing the helper pin
+    # while child/worker cleanup is unresolved.
+    with _QUARANTINE_LOCK:
+        _QUARANTINE.add(recorder)
+
+
+def _release_resolved(recorder):
+    with _QUARANTINE_LOCK:
+        _QUARANTINE.discard(recorder)
 
 
 def _fail(code, message):
@@ -107,6 +121,8 @@ class WgcRecorder:
         self._state, self._pin, self._process, self._worker = "new", None, None, None
         self._pin_active = False
         self._pin_cleanup_failed = False
+        self._cleanup_attempted = False
+        self._spawn_state = "not_started"
         self._starter, self._start_error = None, False
         self._start_done, self._cancel = threading.Event(), threading.Event()
         self._cleanup_lock = threading.Lock()
@@ -139,17 +155,27 @@ class WgcRecorder:
                        "-vf", "hwdownload,format=bgra", "-c:v", "png", "-f", "image2pipe", "pipe:1"]
             def spawn():
                 try:
-                    self._process = self._popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                                stderr=subprocess.DEVNULL,
-                                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    process = self._popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                          stderr=subprocess.DEVNULL,
+                                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    if process is None or process is False:
+                        raise RuntimeError('Recorder spawn returned no original process witness')
+                    self._process = process
+                    self._spawn_state = "returned"
                     if self._cancel.is_set():
                         with self._cleanup_lock:
-                            self._cleanup()
+                            if not self._cleanup():
+                                _retain_unresolved(self)
                 except BaseException:
                     self._start_error = True
+                    if self._spawn_state != "returned":
+                        self._spawn_state = "unresolved"
+                    if self._pin_active:
+                        _retain_unresolved(self)
                 finally:
                     self._start_done.set()
             self._starter = threading.Thread(target=spawn, name="FoundryWgcStart", daemon=True)
+            self._spawn_state = "in_progress"
             self._starter.start()
             if not self._start_done.wait(START_TIMEOUT) or self._start_error:
                 _fail("recording_start_failed", "Recorder startup timed out or failed.")
@@ -201,7 +227,12 @@ class WgcRecorder:
         return frame
 
     def _cleanup(self):
+        if self._cleanup_attempted:
+            return self._state == "closed"
+        self._cleanup_attempted = True
         process = self._process
+        if self._spawn_state in ("in_progress", "unresolved") and process is None:
+            return False
         if process is not None:
             try:
                 if process.poll() is None:
@@ -232,6 +263,7 @@ class WgcRecorder:
             self._pin_cleanup_failed = True
             return False
         self._state = "closed"
+        _release_resolved(self)
         return True
 
     def close(self):
@@ -243,6 +275,17 @@ class WgcRecorder:
         if self._starter is not None and self._starter.is_alive():
             self._starter.join(timeout=CLEANUP_TIMEOUT)
             if self._starter.is_alive():
-                return False
+                with self._cleanup_lock:
+                    if self._state == "closed":
+                        return True
+                    _retain_unresolved(self)
+                    return False
         with self._cleanup_lock:
-            return self._cleanup()
+            try:
+                result = self._cleanup()
+            except BaseException:
+                _retain_unresolved(self)
+                raise
+            if not result:
+                _retain_unresolved(self)
+            return result

@@ -11,6 +11,7 @@ import uuid
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Message, Point, encode_click
 from sims4foundry_cli.native_input import _NativeApi
+from sims4foundry_cli.visual_probe import _pixels
 from sims4foundry_cli.wgc_recorder import WgcRecorder
 from test_guarded_input import identity
 
@@ -55,9 +56,11 @@ class WgcOwnedWindowTests(unittest.TestCase):
         name='FoundryWgcFixture'+uuid.uuid4().hex
         ready, done, stop = threading.Event(), threading.Event(), threading.Event()
         lifetime_lock = threading.Lock()
-        state={'window':None,'error':None,'clicked':False}
+        state={'window':None,'error':None,'clicked':False,'events':[],'destroyed':True,'unregistered':True}
         @WNDPROC
         def callback(hwnd,message,wparam,lparam):
+            if message in (int(Message.LEFT_DOWN),int(Message.LEFT_UP)):
+                state['events'].append((message,int(wparam),int(lparam)))
             if message == int(Message.LEFT_UP):
                 state['clicked']=True
                 invalidate(hwnd,None,True)
@@ -89,11 +92,12 @@ class WgcOwnedWindowTests(unittest.TestCase):
                 state['error']=error; ready.set()
             finally:
                 with lifetime_lock:
-                    if hwnd: destroy(hwnd)
-                    if registered: unregister(name,instance)
+                    if hwnd: state['destroyed']=bool(destroy(hwnd))
+                    if registered: state['unregistered']=bool(unregister(name,instance))
                     done.set()
         thread=threading.Thread(target=owner,daemon=True); thread.start()
         recorder=None
+        recorder_started=False
         try:
             self.assertTrue(ready.wait(5),'Capture fixture did not start')
             if state['error']: raise state['error']
@@ -104,6 +108,7 @@ class WgcOwnedWindowTests(unittest.TestCase):
                                      os.environ['FOUNDRY_WGC_TEST_SHA256'],
                                      observer=lambda *args:deepcopy(target))
                 recorder.start()
+                recorder_started=True
                 deadline=time.monotonic()+12
                 frame=None
                 while time.monotonic()<deadline:
@@ -115,8 +120,12 @@ class WgcOwnedWindowTests(unittest.TestCase):
                 self.assertIsNotNone(frame,'No complete frame arrived from the owned window')
                 self.assertGreater(frame.width,0); self.assertGreater(frame.height,0)
                 self.assertTrue(frame.png.startswith(b'\x89PNG\r\n\x1a\n'))
+                region = (frame.width//2, frame.height//2, 1, 1)
+                _, before_pixel = _pixels(frame.png,region)
+                self.assertTrue(all(value <= 10 for value in before_pixel[:3]),'Fixture did not begin black')
                 native = _NativeApi()
-                for packet in encode_click(Point(20,30),ClientBounds(128,128)):
+                packets = encode_click(Point(20,30),ClientBounds(128,128))
+                for packet in packets:
                     self.assertIs(native.post(state['window'],packet), True)
                 before = frame
                 changed = None
@@ -124,22 +133,30 @@ class WgcOwnedWindowTests(unittest.TestCase):
                 while time.monotonic()<deadline:
                     try:
                         candidate = recorder.sample()
-                        if state['clicked'] and candidate.sequence > before.sequence and candidate.sha256 != before.sha256:
-                            changed = candidate; break
+                        if state['clicked'] and candidate.sequence > before.sequence:
+                            _, pixel = _pixels(candidate.png,region)
+                            if all(value >= 245 for value in pixel[:3]):
+                                changed = candidate; break
                     except FoundryError as error:
                         if error.code != 'recording_unavailable': raise
                     time.sleep(.05)
                 self.assertIsNotNone(changed,'Owned window input was not followed by a changed captured frame')
-                self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
-                recorder=None
+                self.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],
+                                 state['events'])
+                original_recorder, recorder = recorder, None
+                recorder_started=False
+                self.assertTrue(original_recorder.close(),'Owned capture process cleanup was unresolved')
         finally:
             try:
-                if recorder is not None:
-                    self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
+                if recorder_started and recorder is not None:
+                    original_recorder, recorder = recorder, None
+                    recorder_started=False
+                    self.assertTrue(original_recorder.close(),'Owned capture process cleanup was unresolved')
             finally:
                 stop.set()
                 thread.join(timeout=5)
-        self.assertTrue(done.is_set(),'Owned capture window did not stop')
+                if thread.is_alive() or not done.is_set() or not state['destroyed'] or not state['unregistered']:
+                    raise AssertionError('Owned capture window or thread cleanup is unresolved')
 
 
 if __name__ == '__main__': unittest.main()

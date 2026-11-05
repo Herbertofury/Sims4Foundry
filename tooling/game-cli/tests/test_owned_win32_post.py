@@ -36,7 +36,7 @@ class OwnedWin32PostTests(unittest.TestCase):
         name = 'FoundryOwnedFixture' + uuid.uuid4().hex
         ready, done, stop = threading.Event(), threading.Event(), threading.Event()
         lifetime_lock = threading.Lock()
-        state = {'window':None, 'error':None, 'events':[]}
+        state = {'window':None, 'error':None, 'events':[], 'destroyed':True, 'unregistered':True}
         @WNDPROC
         def callback(hwnd, message, wparam, lparam):
             if message in (int(Message.LEFT_DOWN),int(Message.LEFT_UP)):
@@ -65,8 +65,8 @@ class OwnedWin32PostTests(unittest.TestCase):
                 ready.set()
             finally:
                 with lifetime_lock:
-                    if hwnd: destroy(hwnd)
-                    if registered: unregister(name,instance)
+                    if hwnd: state['destroyed'] = bool(destroy(hwnd))
+                    if registered: state['unregistered'] = bool(unregister(name,instance))
                     done.set()
         thread = threading.Thread(target=owner,daemon=True)
         thread.start()
@@ -84,7 +84,8 @@ class OwnedWin32PostTests(unittest.TestCase):
         finally:
             stop.set()
             thread.join(timeout=5)
-        self.assertFalse(thread.is_alive(), 'Owned fixture window did not stop')
+            if thread.is_alive() or not done.is_set() or not state['destroyed'] or not state['unregistered']:
+                raise AssertionError('Owned fixture window or thread cleanup is unresolved')
 
 
 if __name__ == '__main__': unittest.main()
