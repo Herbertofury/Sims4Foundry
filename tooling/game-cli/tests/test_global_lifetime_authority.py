@@ -69,16 +69,15 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         with self.assertRaises(FoundryError): self.claim('3'*32,'4'*32)
 
     def test_separate_processes_cannot_claim_same_lifetime(self):
-        script = ("import sys; from pathlib import Path; "
+        script = ("import sys,json; from pathlib import Path; "
                   "from sims4foundry_cli import global_lifetime_authority as a; "
                   "from sims4foundry_cli.errors import FoundryError; "
-                  "from test_guarded_input import identity; "
                   "a._local_appdata=lambda:Path(sys.argv[1]); "
-                  "exec(\"try:\\n a.claim(identity(),sys.argv[2]*32,sys.argv[3]*32,'a'*64)\\n print('won')\\n"
+                  "exec(\"try:\\n a.claim(json.loads(sys.argv[4]),sys.argv[2]*32,sys.argv[3]*32,'a'*64)\\n print('won')\\n"
                   "except FoundryError as e:\\n print(e.code)\")")
         outputs = []
         for session,witness in (('1','2'),('3','4')):
-            completed = subprocess.run([sys.executable,'-c',script,str(self.root),session,witness],
+            completed = subprocess.run([sys.executable,'-c',script,str(self.root),session,witness,json.dumps(identity())],
                                        check=True,capture_output=True,text=True,timeout=15)
             outputs.append(completed.stdout.strip())
         self.assertEqual(['won','global_lifetime_reserved'],outputs)
