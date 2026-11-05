@@ -56,7 +56,7 @@ class LiveInputBackend:
         self._evidence_binding = None
         self._evidence_completed = False
 
-    def _bind_evidence(self, journal_sha256, session_id, request_id, intent_sha256, target, packets):
+    def _bind_evidence(self, journal_sha256, session_id, request_id, intent_sha256, target, packets, witness):
         """Correlate one registered attempt with this instance in the trusted host."""
         self._context()
         _require(self._evidence_binding is None, 'frame_binding', 'This sender is already bound to an attempt.')
@@ -65,7 +65,7 @@ class LiveInputBackend:
         _require(plan == self._packets and self._recorder is not None and self._frame_epoch is not None,
                  'frame_binding', 'The registered packet plan or recorder differs from this sender.')
         self._evidence_binding = (journal_sha256, session_id, request_id, intent_sha256,
-                                  self._recorder, self._frame_epoch, plan)
+                                  self._recorder, self._frame_epoch, plan, witness)
 
     def _require_evidence_binding(self, journal_sha256, session_id, request_id, intent_sha256, target, *, completed=True):
         self._context()
@@ -76,8 +76,9 @@ class LiveInputBackend:
                  and binding[6] == self._packets and (not completed or self._evidence_completed),
                  'frame_binding', 'The original registered sender, plan, or recorder is unavailable.')
 
-    def _complete_evidence_binding(self, journal_sha256, session_id, request_id, intent_sha256, target):
+    def _complete_evidence_binding(self, journal_sha256, session_id, request_id, intent_sha256, target, *, witness):
         self._require_evidence_binding(journal_sha256, session_id, request_id, intent_sha256, target, completed=False)
+        _require(self._evidence_binding[7] is witness, 'frame_binding', 'The original acquisition witness is required.')
         self._evidence_completed = True
 
     def _context(self):

@@ -134,6 +134,25 @@ class InputFrameEvidenceTests(unittest.TestCase):
             with self.assertRaises(FoundryError):
                 registered_input.reconcile_frame_binding(self.registry,self.history,'2'*32,backend,witness=self.witness)
             self.assertEqual(posts,self.api.posts)
+    def test_recovery_refuses_a_different_held_witness_for_the_same_lifetime(self):
+        second_provider = RetainedProcessRegistry(FakeWitnessApi(),lambda view:True)
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        second_witness = SessionWitness(self.registry,second_provider,process,'5'*32)
+        second_witness.acquire()
+        with self.backend() as backend:
+            original = self.history.execute_once
+            def lose_reply(*args, **kwargs):
+                original(*args, **kwargs)
+                raise OSError('lost fixture reply')
+            with mock.patch.object(self.history,'execute_once',side_effect=lose_reply):
+                with self.assertRaises(OSError): self.dispatch(backend)
+            posts = list(self.api.posts)
+            self.lease.close()
+            with self.assertRaises(FoundryError):
+                registered_input.reconcile_frame_binding(self.registry,self.history,'2'*32,backend,witness=second_witness)
+            with self.assertRaises(FoundryError):
+                input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+            self.assertEqual(posts,self.api.posts)
     def test_failed_admission_cannot_recover_frame_binding(self):
         with self.backend() as backend:
             self.anchor.fail = 'before'

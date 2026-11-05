@@ -56,7 +56,9 @@ observed pending. It sends no packets and does not resolve the journal. It
 cannot recover a failed admission, missing result, changed recorder, lost
 owner or process restart. The journal and registry checks are cooperative,
 path-based observations rather than an atomic snapshot; this is not a
-game-qualified recovery protocol.
+game-qualified recovery protocol. The pending attempt is only observed at a
+point in time: later passive capture does not reserve or recheck the registry
+gate. The binding is not authority for a dependent input.
 The read-only inspection and pixel comparison are also available without the
 session owner through these installed commands (they never send input):
 
