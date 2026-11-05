@@ -64,6 +64,8 @@ class WgcOwnedWindowTests(unittest.TestCase):
                 tracked = (Message.LEFT_DOWN,Message.MOUSE_MOVE,Message.LEFT_UP)
             elif os.environ.get('FOUNDRY_WGC_ACTION') == 'key':
                 tracked = (Message.KEY_DOWN,Message.KEY_UP)
+            elif os.environ.get('FOUNDRY_WGC_ACTION') == 'wheel':
+                tracked = (Message.MOUSE_WHEEL,)
             if message in tuple(int(item) for item in tracked):
                 state['events'].append((message,int(wparam),int(lparam)))
             if message == int(Message.LEFT_UP):

@@ -100,6 +100,10 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                     test.assertTrue(type(mapping) is int and 0 < (mapping & 255) <= 255 and (mapping >> 8) in (0,0xe0))
                     command = dict(common,op='key',key='TAB',scan_code=mapping & 255,extended=bool(mapping >> 8))
                     expected_messages = [0x0100,0x0101]
+                elif action == 'wheel':
+                    x,y = target['client_origin']
+                    command = dict(common,op='wheel',screen_x=x+20,screen_y=y+30,delta=120)
+                    expected_messages = [0x020a]
                 else:
                     command = dict(common,op='click',x=20,y=30)
                     expected_messages = [0x0201,0x0202]

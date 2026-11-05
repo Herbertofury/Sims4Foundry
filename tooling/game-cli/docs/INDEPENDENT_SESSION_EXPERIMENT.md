@@ -77,11 +77,13 @@ ready message, it accepts one JSON object per line, for example:
 
 The fixture protocol also supports `right_click` with the same fields, `drag`
 with `path` (client-coordinate pairs) and `duration_ms`, and `key` with an
-allowlisted navigation key, exact `scan_code` and `extended` boolean. The native
+allowlisted navigation key, exact `scan_code` and `extended` boolean. `wheel`
+takes explicit screen coordinates and a bounded nonzero `delta`; the sender
+checks the point against the observed viewport. The native
 sender checks the active keyboard layout before posting a key. These operations
 remain subject to the same single pending input gate. In addition to fabricated
-provider tests, separate owned-window WGC fixtures received the expected drag
-message sequence and a Tab down/up sequence. These checks do not establish
+provider tests, separate owned-window WGC fixtures received the expected drag,
+wheel and Tab message sequences. These checks do not establish
 delivery or behavior in Sims, UI semantics, or action causality.
 
 `recover_frame_binding` accepts the original `request_id`; `capture_frame`

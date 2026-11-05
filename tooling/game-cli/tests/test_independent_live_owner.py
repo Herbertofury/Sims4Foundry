@@ -129,6 +129,14 @@ class IndependentLiveOwnerTests(unittest.TestCase):
         self.assertEqual('frame_recorded',result['outcome'])
         self.assertEqual([Message.RIGHT_DOWN,Message.RIGHT_UP],[packet.message for packet in self.api.packets])
 
+    def test_wheel_is_one_screen_bound_packet(self):
+        origin = identity()['client_origin']
+        result = self.owner.wheel_once('2'*32,origin[0]+20,origin[1]+30,120,
+                                       expected_observation={'mode':'cas'},evidence_directory=self.root/'evidence')
+        self.assertEqual('frame_recorded',result['outcome'])
+        self.assertEqual([Message.MOUSE_WHEEL],[packet.message for packet in self.api.packets])
+        self.assertTrue(result['no_replay'])
+
     def test_interrupt_after_sender_enter_keeps_original_sender_quarantined(self):
         original = live_input.LiveInputBackend.__enter__
         def interrupt(backend):

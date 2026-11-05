@@ -12,7 +12,7 @@ import os
 from . import input_frame_evidence, input_journal, registered_input
 from .errors import FoundryError
 from .input_packets import (ClientBounds, MouseButton, NavigationKey, Point, ScanCode,
-                            encode_click, encode_drag, encode_key_press)
+                            encode_click, encode_drag, encode_key_press, encode_wheel)
 from .io import external_path
 from .live_input import LiveInputBackend
 from .session_registry import SessionRegistry
@@ -76,6 +76,13 @@ class LiveOwner:
             raise FoundryError('invalid_request', 'An allowlisted navigation key is required.')
         packets = encode_key_press(NavigationKey[key],ScanCode(scan_code,extended))
         return self._dispatch_once(request_id,packets,expected_observation,evidence_directory)
+
+    def wheel_once(self, request_id, screen_x, screen_y, delta, *, expected_observation, evidence_directory):
+        """Post one bounded wheel step at an explicit screen coordinate."""
+        if type(screen_x) is not int or type(screen_y) is not int or type(delta) is not int:
+            raise FoundryError('invalid_request', 'Exact screen coordinates and wheel delta are required.')
+        packet = encode_wheel(Point(screen_x,screen_y),delta)
+        return self._dispatch_once(request_id,(packet,),expected_observation,evidence_directory)
 
     def _dispatch_once(self, request_id, packets, expected_observation, evidence_directory):
         self._owner()

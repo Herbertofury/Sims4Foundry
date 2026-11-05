@@ -116,6 +116,10 @@ def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream
                 result = owner.key_once(value['request_id'],value['key'],value['scan_code'],value['extended'],
                                         expected_observation=value['expectation'],
                                         evidence_directory=value['evidence_directory'])
+            elif operation == 'wheel' and set(value) == {'op','request_id','screen_x','screen_y','delta','expectation','evidence_directory'}:
+                result = owner.wheel_once(value['request_id'],value['screen_x'],value['screen_y'],value['delta'],
+                                          expected_observation=value['expectation'],
+                                          evidence_directory=value['evidence_directory'])
             elif operation == 'recover_frame_binding' and set(value) == {'op','request_id'}:
                 result = owner.recover_frame_binding(value['request_id'])
             elif operation == 'capture_frame' and set(value) == {'op','request_id','evidence_directory'}:

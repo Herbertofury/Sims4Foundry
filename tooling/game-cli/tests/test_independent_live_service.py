@@ -90,6 +90,15 @@ class LiveServiceTests(unittest.TestCase):
         self.assertEqual(2,len(self.api.posts))
         self.assertEqual('owner_stopped',result['outcome'])
 
+    def test_service_routes_screen_bound_wheel(self):
+        origin = identity()['client_origin']
+        command = {'op':'wheel','request_id':'2'*32,'screen_x':origin[0]+20,'screen_y':origin[1]+30,'delta':120,
+                   'expectation':{'mode':'cas'},'evidence_directory':str(self.root/'evidence')}
+        result, rows = self.run_service([command,{'op':'stop','abandon':True}])
+        self.assertEqual('frame_recorded',rows[1]['outcome'])
+        self.assertEqual(1,len(self.api.posts))
+        self.assertEqual('owner_stopped',result['outcome'])
+
     def test_eof_retains_unresolved_owner_without_closing_or_reacquiring(self):
         result, rows = self.run_service([])
         self.assertEqual('owner_input_closed',result['outcome'])
