@@ -7,6 +7,7 @@ from unittest import mock
 
 from sims4foundry_cli import independent_live_owner, input_journal, live_input, registered_input
 from sims4foundry_cli.errors import FoundryError
+from sims4foundry_cli.input_packets import Message
 from sims4foundry_cli.retained_process_witness import RetainedProcessRegistry
 from sims4foundry_cli.session_registry import SessionRegistry
 from sims4foundry_cli.session_witness import SessionWitness
@@ -105,6 +106,28 @@ class IndependentLiveOwnerTests(unittest.TestCase):
         self.assertEqual('after_admission_entry',result['phase'])
         self.assertTrue(result['input_may_have_been_sent'])
         self.assertTrue(result['no_replay'])
+
+    def test_bounded_drag_sends_original_down_move_and_release(self):
+        result = self.owner.drag_once('2'*32,[[20,30],[40,50]],5,
+                                     expected_observation={'mode':'build'},evidence_directory=self.root/'evidence')
+        self.assertEqual('frame_recorded',result['outcome'])
+        self.assertEqual([Message.LEFT_DOWN,Message.MOUSE_MOVE,Message.LEFT_UP],
+                         [packet.message for packet in self.api.packets])
+        self.assertTrue(result['no_replay'])
+
+    def test_navigation_key_uses_runtime_mapping_and_original_release(self):
+        self.api.mapping = lambda key,layout:15
+        result = self.owner.key_once('2'*32,'TAB',15,False,
+                                    expected_observation={'mode':'cas'},evidence_directory=self.root/'evidence')
+        self.assertEqual('frame_recorded',result['outcome'])
+        self.assertEqual([Message.KEY_DOWN,Message.KEY_UP],[packet.message for packet in self.api.packets])
+        self.assertTrue(result['no_replay'])
+
+    def test_right_click_uses_bound_button_release(self):
+        result = self.owner.click_once('2'*32,20,30,button='right',
+                                       expected_observation={'mode':'live'},evidence_directory=self.root/'evidence')
+        self.assertEqual('frame_recorded',result['outcome'])
+        self.assertEqual([Message.RIGHT_DOWN,Message.RIGHT_UP],[packet.message for packet in self.api.packets])
 
     def test_interrupt_after_sender_enter_keeps_original_sender_quarantined(self):
         original = live_input.LiveInputBackend.__enter__

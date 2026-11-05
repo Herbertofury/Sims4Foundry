@@ -75,6 +75,13 @@ ready message, it accepts one JSON object per line, for example:
 {"op":"stop","abandon":true}
 ```
 
+The fixture protocol also supports `right_click` with the same fields, `drag`
+with `path` (client-coordinate pairs) and `duration_ms`, and `key` with an
+allowlisted navigation key, exact `scan_code` and `extended` boolean. The native
+sender checks the active keyboard layout before posting a key. These operations
+are covered by fabricated-provider tests only; they are not game-qualified and
+remain subject to the same single pending input gate.
+
 `recover_frame_binding` accepts the original `request_id`; `capture_frame`
 also accepts a new `evidence_directory`. Both use the still-retained sender and
 send no input. Frame output and input status do not acknowledge a transition.

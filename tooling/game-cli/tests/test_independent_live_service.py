@@ -72,6 +72,24 @@ class LiveServiceTests(unittest.TestCase):
             with self.assertRaises(FoundryError): self.run_service([])
             api.assert_not_called()
 
+    def test_service_routes_drag_with_pending_gate(self):
+        command = {'op':'drag','request_id':'2'*32,'path':[[20,30],[40,50]],'duration_ms':5,
+                   'expectation':{'mode':'build'},'evidence_directory':str(self.root/'evidence')}
+        result, rows = self.run_service([command,{'op':'stop','abandon':True}])
+        self.assertEqual('frame_recorded',rows[1]['outcome'])
+        self.assertTrue(rows[1]['no_replay'])
+        self.assertEqual(3,len(self.api.posts))
+        self.assertEqual('owner_stopped',result['outcome'])
+
+    def test_service_routes_navigation_key(self):
+        self.api.mapping = lambda key,layout:15
+        command = {'op':'key','request_id':'2'*32,'key':'TAB','scan_code':15,'extended':False,
+                   'expectation':{'mode':'cas'},'evidence_directory':str(self.root/'evidence')}
+        result, rows = self.run_service([command,{'op':'stop','abandon':True}])
+        self.assertEqual('frame_recorded',rows[1]['outcome'])
+        self.assertEqual(2,len(self.api.posts))
+        self.assertEqual('owner_stopped',result['outcome'])
+
     def test_eof_retains_unresolved_owner_without_closing_or_reacquiring(self):
         result, rows = self.run_service([])
         self.assertEqual('owner_input_closed',result['outcome'])

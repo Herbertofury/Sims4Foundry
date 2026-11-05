@@ -104,6 +104,18 @@ def serve(authority, session, witness_id, ffmpeg, ffmpeg_sha256, *, input_stream
                 result = owner.click_once(value['request_id'],value['x'],value['y'],
                                           expected_observation=value['expectation'],
                                           evidence_directory=value['evidence_directory'])
+            elif operation == 'right_click' and set(value) == {'op','request_id','x','y','expectation','evidence_directory'}:
+                result = owner.click_once(value['request_id'],value['x'],value['y'],button='right',
+                                          expected_observation=value['expectation'],
+                                          evidence_directory=value['evidence_directory'])
+            elif operation == 'drag' and set(value) == {'op','request_id','path','duration_ms','expectation','evidence_directory'}:
+                result = owner.drag_once(value['request_id'],value['path'],value['duration_ms'],
+                                         expected_observation=value['expectation'],
+                                         evidence_directory=value['evidence_directory'])
+            elif operation == 'key' and set(value) == {'op','request_id','key','scan_code','extended','expectation','evidence_directory'}:
+                result = owner.key_once(value['request_id'],value['key'],value['scan_code'],value['extended'],
+                                        expected_observation=value['expectation'],
+                                        evidence_directory=value['evidence_directory'])
             elif operation == 'recover_frame_binding' and set(value) == {'op','request_id'}:
                 result = owner.recover_frame_binding(value['request_id'])
             elif operation == 'capture_frame' and set(value) == {'op','request_id','evidence_directory'}:

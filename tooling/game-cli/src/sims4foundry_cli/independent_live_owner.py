@@ -11,7 +11,8 @@ import os
 
 from . import input_frame_evidence, input_journal, registered_input
 from .errors import FoundryError
-from .input_packets import ClientBounds, Point, encode_click
+from .input_packets import (ClientBounds, MouseButton, NavigationKey, Point, ScanCode,
+                            encode_click, encode_drag, encode_key_press)
 from .io import external_path
 from .live_input import LiveInputBackend
 from .session_registry import SessionRegistry
@@ -49,15 +50,41 @@ class LiveOwner:
         if threading.current_thread() is not self._thread or self._busy:
             raise FoundryError('live_owner_busy', 'Use the original owner thread without reentry.')
 
-    def click_once(self, request_id, x, y, *, expected_observation, evidence_directory):
+    def click_once(self, request_id, x, y, *, expected_observation, evidence_directory, button='left'):
         """Post one exact click and save passive evidence, with no acknowledgement."""
+        if type(x) is not int or type(y) is not int or type(button) is not str or button not in ('left','right'):
+            raise FoundryError('invalid_request', 'Exact coordinates and a supported button are required.')
+        target = input_journal._target(self._journal.session['target'])
+        packets = encode_click(Point(x,y),ClientBounds(target['client_width'],target['client_height']),
+                               button=MouseButton(button))
+        return self._dispatch_once(request_id,packets,expected_observation,evidence_directory)
+
+    def drag_once(self, request_id, path, duration_ms, *, expected_observation, evidence_directory):
+        """Post one bounded client-area drag and retain its original release."""
+        if (type(path) not in (list,tuple) or not 2 <= len(path) <= 128
+                or any(type(point) not in (list,tuple) or len(point) != 2
+                       or any(type(value) is not int for value in point) for point in path)):
+            raise FoundryError('invalid_request', 'A bounded list of exact client-area points is required.')
+        target = input_journal._target(self._journal.session['target'])
+        packets = encode_drag(tuple(Point(*point) for point in path),
+                              ClientBounds(target['client_width'],target['client_height']),duration_ms=duration_ms)
+        return self._dispatch_once(request_id,packets,expected_observation,evidence_directory)
+
+    def key_once(self, request_id, key, scan_code, extended, *, expected_observation, evidence_directory):
+        """Post one allowlisted navigation key with an independently checked mapping."""
+        if type(key) is not str or key not in NavigationKey.__members__:
+            raise FoundryError('invalid_request', 'An allowlisted navigation key is required.')
+        packets = encode_key_press(NavigationKey[key],ScanCode(scan_code,extended))
+        return self._dispatch_once(request_id,packets,expected_observation,evidence_directory)
+
+    def _dispatch_once(self, request_id, packets, expected_observation, evidence_directory):
         self._owner()
         if self._backend is not None:
             raise FoundryError('live_owner_unresolved', 'Original sender is retained; inspect it without reopening.')
-        if not input_journal._token(request_id) or type(x) is not int or type(y) is not int:
-            raise FoundryError('invalid_request', 'An exact request ID and integer coordinates are required.')
+        if not input_journal._token(request_id):
+            raise FoundryError('invalid_request', 'An exact request ID is required.')
         target = input_journal._target(self._journal.session['target'])
-        packets = encode_click(Point(x,y),ClientBounds(target['client_width'],target['client_height']))
+        packets, _ = input_journal._packets(packets,target)
         expectation = input_journal._expectation(expected_observation)
         output = external_path(evidence_directory)
         if output.exists() or output.is_symlink():
