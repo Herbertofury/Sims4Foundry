@@ -125,6 +125,40 @@ def execute_once(registry, journal, request_id, packets, backend, *, expected_ob
     return result
 
 
+def execute_after_admission(registry, journal, request_id, packets, prepare_backend, *, expected_observation, witness):
+    """Reserve the shared input attempt before preparing the original live sender.
+
+    The trusted same-thread callback must retain and return its exact live
+    backend. Setup failure leaves the registry attempt unresolved; this never
+    reopens or retries a sender after an uncertain outcome.
+    """
+    _check(registry,journal)
+    if not input_journal._token(request_id) or not callable(prepare_backend):
+        raise FoundryError('invalid_request', 'An exact request ID and backend preparation are required.')
+    target = input_journal._target(journal.session['target'])
+    packets, wire = input_journal._packets(packets,target)
+    expectation = input_journal._expectation(expected_observation)
+    intent = {'schema':1,'request_id':request_id,'session_id':journal.session['session_id'],
+              'target':target,'packets':wire,'expectation':expectation}
+    expected_hash = digest(intent)
+    if type(witness) is not SessionWitness:
+        raise FoundryError('witness_binding', 'The original retained session witness is required.')
+    with witness.guard_for_dispatch(registry) as check_live:
+        registry.begin(request_id,'input',expected_hash)
+        backend = prepare_backend()
+        if type(backend) is not LiveInputBackend:
+            raise FoundryError('unsupported_backend', 'The original exact live sender is required.')
+        wrapped = _WitnessBoundBackend(backend,check_live,target['hwnd'],packets)
+        binding = (journal_binding(journal),journal.session['session_id'],request_id,expected_hash,target)
+        backend._bind_evidence(*binding,packets,witness)
+        result = journal.execute_once(request_id,packets,wrapped,expected_observation=expectation)
+        if result.get('intent_sha256') != expected_hash:
+            raise FoundryError('registry_binding', 'Journal returned a different intent; do not replay.')
+        if result.get('state') == 'awaiting_readback':
+            backend._complete_evidence_binding(*binding,witness=witness)
+        return result
+
+
 def reconcile_frame_binding(registry, journal, request_id, backend, *, witness):
     """Recover only an existing same-owner frame binding; never dispatch input.
 

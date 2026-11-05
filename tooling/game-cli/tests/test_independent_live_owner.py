@@ -38,6 +38,10 @@ class IndependentLiveOwnerTests(unittest.TestCase):
             item.start()
             self.addCleanup(item.stop)
         self.owner = independent_live_owner.LiveOwner(self.registry,self.journal,self.witness,'ffmpeg.exe','a'*64)
+        def close_original():
+            if self.owner._backend_open and not self.owner._close_attempted:
+                self.owner.close_sender()
+        self.addCleanup(close_original)
 
     def click(self, request='2'*32, output='evidence'):
         return self.owner.click_once(request,20,30,expected_observation={'mode':'cas'},
@@ -56,11 +60,43 @@ class IndependentLiveOwnerTests(unittest.TestCase):
         self.assertEqual(2,len(self.api.posts))
 
     def test_lost_evidence_result_never_reposts_original_click(self):
-        with mock.patch.object(independent_live_owner.input_frame_evidence,'capture',side_effect=OSError('lost reply')):
-            with self.assertRaises(FoundryError): self.click()
+        with mock.patch.object(independent_live_owner.input_frame_evidence,'capture',
+                               side_effect=FoundryError('output_exists','fixture')):
+            with self.assertRaises(FoundryError) as error: self.click()
+        self.assertEqual('after_admission_entry',error.exception.details['phase'])
+        self.assertTrue(error.exception.details['input_may_have_been_sent'])
+        self.assertTrue(error.exception.details['no_replay'])
+        self.assertEqual('output_exists',error.exception.details['original_error_code'])
         self.assertEqual('awaiting_readback',self.journal.status('2'*32)['state'])
         with self.assertRaises(FoundryError): self.click(output='other')
         self.assertEqual(2,len(self.api.posts))
+
+    def test_setup_failure_leaves_shared_attempt_fenced(self):
+        with mock.patch.object(PngRecorder,'start',side_effect=OSError('fixture setup failure')):
+            with self.assertRaises(FoundryError) as error: self.click()
+        self.assertTrue(error.exception.details['no_replay'])
+        self.assertEqual('attempt',self.registry.inspect()['events'][-1]['kind'])
+        self.assertEqual([],self.api.posts)
+        new_owner = independent_live_owner.LiveOwner(self.registry,self.journal,self.witness,'ffmpeg.exe','a'*64)
+        with mock.patch.object(independent_live_owner,'LiveInputBackend') as backend:
+            with self.assertRaises(FoundryError):
+                new_owner.click_once('3'*32,20,30,expected_observation={'mode':'cas'},
+                                     evidence_directory=self.root/'other')
+            backend.assert_not_called()
+
+    def test_lost_journal_reply_can_recover_only_original_retained_sender(self):
+        original = self.journal.execute_once
+        def lose_reply(*args, **kwargs):
+            original(*args, **kwargs)
+            raise OSError('lost fixture reply')
+        with mock.patch.object(self.journal,'execute_once',side_effect=lose_reply):
+            with self.assertRaises(FoundryError): self.click()
+        result = self.owner.recover_frame_binding('2'*32)
+        self.assertEqual('same_owner_frame_binding_available',result['state'])
+        captured = self.owner.capture_frame('2'*32,self.root/'recovered-evidence')
+        self.assertEqual('frame_recorded',captured['outcome'])
+        self.assertEqual(2,len(self.api.posts))
+        self.assertFalse(result['acknowledged'])
 
     def test_existing_request_is_refused_before_opening_backend(self):
         self.click()

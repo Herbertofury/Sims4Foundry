@@ -38,9 +38,15 @@ required before this can become a working game-control workflow.
 `independent_live_owner.LiveOwner` is an experimental Python composition for a
 host which already owns the exact registry, journal and retained process
 witness. `click_once` accepts one explicit client-area click, attempts it through
-the existing durable input path, and records a passive WGC frame. Existing
-request IDs are refused before the native sender is opened; an unresolved
-registry gate blocks a later request. No input acknowledgment, UI transition,
+the existing durable input path, and records a passive WGC frame. It reserves
+the shared input attempt before recorder setup; setup failure stays pending.
+Existing request IDs are refused before the native sender is opened; an
+unresolved registry gate blocks a later request. Once admission is entered,
+errors report that input may have been sent and must not be replayed. The owner
+retains the original sender and recorder until its explicit one-shot cleanup;
+the same owner can reconcile a lost journal reply and capture a passive frame
+without another input. If cleanup is interrupted or unconfirmed, do not retry
+it or reopen a sender. No input acknowledgment, UI transition,
 semantic state or game qualification is claimed. Its owner must remain on the
 same thread and must independently manage witness acquisition and lifetime.
 This is not wired into the installed CLI or a cross-process owner service.

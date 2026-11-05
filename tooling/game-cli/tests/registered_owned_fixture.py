@@ -112,6 +112,7 @@ def run_owned(test, hwnd, window_class, state, ffmpeg, ffmpeg_hash):
                         owner.click_once('3'*32,20,30,expected_observation={'fixture':'white'},
                                          evidence_directory=root/'different-evidence')
                     test.assertEqual(2,len(state['events']))
+                    test.assertEqual('sender_cleanup_reported',owner.close_sender()['outcome'])
                 else:
                     run_original(test,registry,journal,witness,packets,target,ffmpeg,ffmpeg_hash,state,root)
                 result=lease.close()
