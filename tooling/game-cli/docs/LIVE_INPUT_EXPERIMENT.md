@@ -20,9 +20,12 @@ The test requires explicit
 `FOUNDRY_WGC_TEST_FFMPEG` and `FOUNDRY_WGC_TEST_SHA256` values and controls only
 its own fixture window and recorder. Neither test qualifies Sims behavior.
 Recorder startup with an unknown child-creation outcome and unsuccessful
-cleanup retain the original recorder and pin in an in-process quarantine. An
-uncertain cleanup is not silently repeated or reported as complete; process
-termination ends that in-memory ownership and is not restart recovery.
+cleanup retain the recorder and pin objects in an in-process quarantine. If a
+pin close itself failed, retained objects do not prove which OS handles remain
+open. An uncertain cleanup is not silently repeated or reported as complete;
+process termination ends that in-memory ownership and is not restart recovery.
+An entry-time pin cleanup failure also remains unresolved. If termination of
+the owned recorder does not complete in time, no second termination is issued.
 
 This is not yet a supported CLI operation or game-qualified provider. A native
 queue acceptance is not delivery, state transition or semantic success. The

@@ -533,7 +533,13 @@ class ExchangeScenarios:
         self.assertTrue(uncertain.uncertainty_latched); self.assertFalse(uncertain.mutation)
         self.assertEqual('possible', uncertain.transmission)
         result = fixture.last_result
-        status = self.reconcile(fixture)
+        try:
+            status = self.reconcile(fixture)
+        except FoundryError as error:
+            underlying = self.errors[-1] if self.errors else None
+            raise AssertionError('Receipt-only fixture reconciliation failed: type=%s code=%s errno=%s' %
+                                 (type(underlying).__name__, getattr(underlying, 'code', None),
+                                  getattr(underlying, 'errno', None))) from error
         self.assertEqual('adapter_returned', status.state)
         self.assertEqual(result, self.replies[-1]['adapter_result'])
         self.assertTrue(status.uncertainty_latched)

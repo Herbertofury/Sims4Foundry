@@ -30,8 +30,9 @@ _QUARANTINE_LOCK = threading.Lock()
 
 
 def _retain_unresolved(recorder):
-    # Strong ownership prevents finalization from releasing the helper pin
-    # while child/worker cleanup is unresolved.
+    # Strong ownership prevents object finalization from initiating pin cleanup
+    # while child/worker cleanup is unresolved. It cannot prove handle state if
+    # an earlier pin close itself failed.
     with _QUARANTINE_LOCK:
         _QUARANTINE.add(recorder)
 
@@ -145,7 +146,13 @@ class WgcRecorder:
         self._state = "starting"
         try:
             self._pin = self._pin_factory(str(self._ffmpeg), self._hash)
-            self._pin.__enter__()
+            try:
+                self._pin.__enter__()
+            except BaseException as error:
+                if not isinstance(error, FoundryError) or error.code != "capture_tool_identity":
+                    self._pin_cleanup_failed = True
+                    _retain_unresolved(self)
+                raise
             self._pin_active = True
             self._observe()
             command = [str(self._ffmpeg), "-nostdin", "-hide_banner", "-loglevel", "error",
@@ -186,7 +193,9 @@ class WgcRecorder:
             self._state = "running"
         except BaseException as error:
             self._cancel.set()
-            self._state = "failed"
+            with self._cleanup_lock:
+                if self._state != "closed":
+                    self._state = "failed"
             if not self.close():
                 _fail("recording_cleanup_unresolved", "Recorder startup cleanup is unresolved.")
             if not isinstance(error, Exception):
@@ -240,8 +249,9 @@ class WgcRecorder:
                     try:
                         process.wait(timeout=CLEANUP_TIMEOUT)
                     except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=CLEANUP_TIMEOUT)
+                        # On Windows kill is another termination request, not
+                        # an independent acknowledgment of the first one.
+                        return False
                 if process.poll() is None:
                     return False
             except Exception:

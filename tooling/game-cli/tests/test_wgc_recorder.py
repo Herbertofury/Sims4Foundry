@@ -188,6 +188,29 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(1,self.proc.terminated)
         self.assertFalse(self.pinned)
         self.assertTrue(self.recorder.close())
+    def test_late_cleanup_cannot_be_overwritten_by_failed_start_state(self):
+        gate = threading.Event()
+        def late(*args, **kwargs):
+            gate.wait()
+            return self.proc
+        self.recorder._popen = late
+        flag = threading.Event()
+        owner = self.recorder
+        class CancelAndJoin:
+            def set(self):
+                flag.set()
+                gate.set()
+                owner._starter.join(timeout=1)
+            def is_set(self): return flag.is_set()
+        self.recorder._cancel = CancelAndJoin()
+        with mock.patch.object(recorder, 'START_TIMEOUT', .01):
+            with self.assertRaises(FoundryError) as error: self.recorder.start()
+        self.assertEqual('recording_start_failed', error.exception.code)
+        self.assertEqual('closed', self.recorder._state)
+        self.assertEqual(1, self.proc.terminated)
+        self.assertFalse(self.pinned)
+        with recorder._QUARANTINE_LOCK:
+            self.assertNotIn(self.recorder, recorder._QUARANTINE)
     def test_failed_pin_cleanup_is_never_relabelled_clean(self):
         calls=[]
         @contextmanager
@@ -221,6 +244,35 @@ class RecorderTests(unittest.TestCase):
         self.proc.stdout.close()
         self.recorder._worker.join(timeout=1)
         with recorder._QUARANTINE_LOCK:
+            recorder._QUARANTINE.discard(self.recorder)
+    def test_termination_timeout_does_not_send_second_termination(self):
+        calls=[]
+        self.proc.terminate = lambda:calls.append('terminate')
+        self.proc.kill = lambda:calls.append('kill')
+        self.proc.wait = mock.Mock(side_effect=subprocess.TimeoutExpired('fixture',1))
+        self.recorder.start()
+        self.assertFalse(self.recorder.close())
+        self.assertFalse(self.recorder.close())
+        self.assertEqual(['terminate'],calls)
+        self.assertEqual(1,self.proc.wait.call_count)
+        self.proc.code = 0
+        self.proc.stdout.close()
+        self.recorder._worker.join(timeout=1)
+        with recorder._QUARANTINE_LOCK:
+            recorder._QUARANTINE.discard(self.recorder)
+    def test_pin_entry_cleanup_failure_remains_unresolved(self):
+        class FailedPin:
+            def __enter__(self):
+                raise FoundryError('capture_pin_cleanup_failed','fixture')
+            def __exit__(self,*args):
+                raise AssertionError('pin entry was never completed')
+        self.recorder._pin_factory = lambda *args:FailedPin()
+        with self.assertRaises(FoundryError) as error: self.recorder.start()
+        self.assertEqual('recording_cleanup_unresolved',error.exception.code)
+        self.assertTrue(self.recorder._pin_cleanup_failed)
+        self.assertFalse(self.recorder.close())
+        with recorder._QUARANTINE_LOCK:
+            self.assertIn(self.recorder,recorder._QUARANTINE)
             recorder._QUARANTINE.discard(self.recorder)
     def test_wrong_thread_does_not_start_helper(self):
         errors=[]

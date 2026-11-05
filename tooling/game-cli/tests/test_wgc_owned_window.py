@@ -12,7 +12,7 @@ from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Message, Point, encode_click
 from sims4foundry_cli.native_input import _NativeApi
 from sims4foundry_cli.visual_probe import _pixels
-from sims4foundry_cli.wgc_recorder import WgcRecorder
+from sims4foundry_cli.wgc_recorder import WgcRecorder, _retain_unresolved
 from test_guarded_input import identity
 
 
@@ -97,7 +97,7 @@ class WgcOwnedWindowTests(unittest.TestCase):
                     done.set()
         thread=threading.Thread(target=owner,daemon=True); thread.start()
         recorder=None
-        recorder_started=False
+        close_attempted=False
         try:
             self.assertTrue(ready.wait(5),'Capture fixture did not start')
             if state['error']: raise state['error']
@@ -107,8 +107,10 @@ class WgcOwnedWindowTests(unittest.TestCase):
                 recorder=WgcRecorder(target,os.environ['FOUNDRY_WGC_TEST_FFMPEG'],
                                      os.environ['FOUNDRY_WGC_TEST_SHA256'],
                                      observer=lambda *args:deepcopy(target))
+                # Hold strong ownership across interruption windows. A failed
+                # start performs its own one-shot cleanup or stays quarantined.
+                _retain_unresolved(recorder)
                 recorder.start()
-                recorder_started=True
                 deadline=time.monotonic()+12
                 frame=None
                 while time.monotonic()<deadline:
@@ -143,15 +145,13 @@ class WgcOwnedWindowTests(unittest.TestCase):
                 self.assertIsNotNone(changed,'Owned window input was not followed by a changed captured frame')
                 self.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],
                                  state['events'])
-                original_recorder, recorder = recorder, None
-                recorder_started=False
-                self.assertTrue(original_recorder.close(),'Owned capture process cleanup was unresolved')
+                close_attempted=True
+                self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
         finally:
             try:
-                if recorder_started and recorder is not None:
-                    original_recorder, recorder = recorder, None
-                    recorder_started=False
-                    self.assertTrue(original_recorder.close(),'Owned capture process cleanup was unresolved')
+                if recorder is not None and not close_attempted and not recorder._cancel.is_set():
+                    close_attempted=True
+                    self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
             finally:
                 stop.set()
                 thread.join(timeout=5)
