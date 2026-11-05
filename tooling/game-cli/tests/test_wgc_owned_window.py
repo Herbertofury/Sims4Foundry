@@ -125,28 +125,36 @@ class WgcOwnedWindowTests(unittest.TestCase):
                 region = (frame.width//2, frame.height//2, 1, 1)
                 _, before_pixel = _pixels(frame.png,region)
                 self.assertTrue(all(value <= 10 for value in before_pixel[:3]),'Fixture did not begin black')
-                native = _NativeApi()
-                packets = encode_click(Point(20,30),ClientBounds(128,128))
-                for packet in packets:
-                    self.assertIs(native.post(state['window'],packet), True)
-                before = frame
-                changed = None
-                deadline = time.monotonic()+12
-                while time.monotonic()<deadline:
-                    try:
-                        candidate = recorder.sample()
-                        if state['clicked'] and candidate.sequence > before.sequence:
-                            _, pixel = _pixels(candidate.png,region)
-                            if all(value >= 245 for value in pixel[:3]):
-                                changed = candidate; break
-                    except FoundryError as error:
-                        if error.code != 'recording_unavailable': raise
-                    time.sleep(.05)
-                self.assertIsNotNone(changed,'Owned window input was not followed by a changed captured frame')
-                self.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],
-                                 state['events'])
-                close_attempted=True
-                self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
+                if os.environ.get('FOUNDRY_WGC_REGISTERED_TEST') == '1':
+                    close_attempted=True
+                    self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
+                    from registered_owned_fixture import run_owned
+                    run_owned(self,state['window'],name,state,os.environ['FOUNDRY_WGC_TEST_FFMPEG'],
+                              os.environ['FOUNDRY_WGC_TEST_SHA256'])
+                else:
+                    # The ordinary opt-in fixture checks raw posting plus WGC.
+                    native = _NativeApi()
+                    packets = encode_click(Point(20,30),ClientBounds(128,128))
+                    for packet in packets:
+                        self.assertIs(native.post(state['window'],packet), True)
+                    before = frame
+                    changed = None
+                    deadline = time.monotonic()+12
+                    while time.monotonic()<deadline:
+                        try:
+                            candidate = recorder.sample()
+                            if state['clicked'] and candidate.sequence > before.sequence:
+                                _, pixel = _pixels(candidate.png,region)
+                                if all(value >= 245 for value in pixel[:3]):
+                                    changed = candidate; break
+                        except FoundryError as error:
+                            if error.code != 'recording_unavailable': raise
+                        time.sleep(.05)
+                    self.assertIsNotNone(changed,'Owned window input was not followed by a changed captured frame')
+                    self.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],
+                                     state['events'])
+                    close_attempted=True
+                    self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
         finally:
             try:
                 if recorder is not None and not close_attempted and not recorder._cancel.is_set():

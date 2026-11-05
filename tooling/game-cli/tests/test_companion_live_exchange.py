@@ -654,6 +654,15 @@ class ExchangeScenarios:
 
 
 class AuthenticatedExchangeTests(ExchangeScenarios, unittest.TestCase):
+    def test_fixture_diagnostics_do_not_echo_unknown_error_data(self):
+        class ForeignError(Exception):
+            code = 'PRIVATE-UNRECOGNIZED-CODE'
+            errno = 'PRIVATE-UNRECOGNIZED-ERRNO'
+        self.errors.append(ForeignError('PRIVATE-MESSAGE'))
+        details = self.error_details()
+        self.assertNotIn('PRIVATE',details)
+        self.assertIn('kind=other code=other errno=None',details)
+
     def test_uncertain_live_read_never_clears_existing_mutation_barrier(self):
         # A preexisting mutation intent remains unresolved across unrelated reads.
         mutation = legacy.Submission(wire.Request('9' * 32, self.item.request.session_id,

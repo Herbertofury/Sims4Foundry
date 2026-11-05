@@ -21,7 +21,16 @@ The test requires explicit
 its own fixture window and recorder. Neither test qualifies Sims behavior.
 A separate GitHub Windows runner test exercises the retained live sender and
 journal against a newly compiled owned fixture, with a synthetic recorder; it
-does not run on the user's machine or prove Sims or WGC behavior.
+does not prove Sims or WGC behavior. Its `GITHUB_ACTIONS` environment check is
+a convention, not proof that a host is disposable, and fixture child acquisition
+and cleanup are not a production ownership protocol.
+With `FOUNDRY_WGC_REGISTERED_TEST=1`, the opt-in owned-window test additionally
+exercises the registry, retained witness, journal, live sender and real WGC
+stream together. It substitutes the Sims-specific identity validator and
+independent inspector only for the test's own PID, image and window; its key is
+in memory and its SQLite anchor is cooperative. It leaves the journal awaiting
+readback. It does not qualify an unpatched Sims identity, game action, frame
+capture time or authenticated semantic observation.
 Recorder startup with an unknown child-creation outcome and unsuccessful
 cleanup retain the recorder and pin objects in an in-process quarantine. If a
 pin close itself failed, retained objects do not prove which OS handles remain
