@@ -555,5 +555,30 @@ class NativePacketFixtureTests(unittest.TestCase):
     def test_drag_backend_and_runner_on_new_synthetic_window(self):
         self._exercise_packet_kind("drag")
 
+    def test_retained_live_sender_and_journal_on_owned_fixture(self):
+        # Real process/window lease and PostMessage; recording is fabricated.
+        # This executes only on disposable GitHub Windows runners, never Sims.
+        from sims4foundry_cli import input_journal, live_input
+        from sims4foundry_cli.windows import inspect
+        from test_live_input import FakeRecorder
+        process, hwnd = self.start_fixture("retained-live-sender")
+        expected = inspect(process.pid,self.exe,self.checksum,hwnd)
+        packets = encode_click(Point(20,20),ClientBounds(expected['client_width'],expected['client_height']))
+        history = input_journal.InputJournal.create(self.root/'retained-live-history','1'*32,expected)
+        baseline = self.events_path.read_text().splitlines()
+        with mock.patch.object(live_input,'WgcRecorder',FakeRecorder):
+            with live_input.LiveInputBackend(expected,packets,str(self.root/'ffmpeg.exe'),'a'*64) as backend:
+                result = history.execute_once('2'*32,packets,backend,expected_observation={'fixture':'clicked'})
+        self.assertEqual('awaiting_readback',result['state'])
+        self.assertFalse(result['result']['semantic_success'])
+        deadline=time.monotonic()+5
+        rows=[]
+        while time.monotonic()<deadline:
+            rows=self.events_path.read_text().splitlines()[len(baseline):]
+            if len(rows)>=len(packets): break
+            time.sleep(.01)
+        self.assertEqual([(int(p.message),p.wparam,p.lparam) for p in packets],
+                         [tuple(int(v) for v in row.split(',')) for row in rows])
+
 
 if __name__=="__main__": unittest.main()

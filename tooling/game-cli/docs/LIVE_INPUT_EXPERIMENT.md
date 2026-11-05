@@ -19,6 +19,9 @@ frame was captured after the click; receipt time is not proof of capture time.
 The test requires explicit
 `FOUNDRY_WGC_TEST_FFMPEG` and `FOUNDRY_WGC_TEST_SHA256` values and controls only
 its own fixture window and recorder. Neither test qualifies Sims behavior.
+A separate GitHub Windows runner test exercises the retained live sender and
+journal against a newly compiled owned fixture, with a synthetic recorder; it
+does not run on the user's machine or prove Sims or WGC behavior.
 Recorder startup with an unknown child-creation outcome and unsuccessful
 cleanup retain the recorder and pin objects in an in-process quarantine. If a
 pin close itself failed, retained objects do not prove which OS handles remain
