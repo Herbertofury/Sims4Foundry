@@ -7,13 +7,18 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from sims4foundry_cli import input_frame_evidence, input_journal, live_input
+from sims4foundry_cli import input_frame_evidence, input_journal, live_input, registered_input
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Point, encode_click
 from sims4foundry_cli.wgc_recorder import Frame
 from test_guarded_input import identity
 from test_live_input import FakeApi, FakeLease, FakeRecorder
 from test_windows_cli import png
+from sims4foundry_cli.session_registry import SessionRegistry
+from sims4foundry_cli.session_witness import SessionWitness
+from sims4foundry_cli.retained_process_witness import RetainedProcessRegistry
+from test_session_registry import FakeAnchor
+from test_session_witness import FakeApi as FakeWitnessApi
 
 
 class PngRecorder(FakeRecorder):
@@ -29,6 +34,13 @@ class InputFrameEvidenceTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.history = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
+        (self.root/'registry').mkdir()
+        self.registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
+        self.registry.open_session('1'*32,registered_input.journal_binding(self.history))
+        self.provider = RetainedProcessRegistry(FakeWitnessApi(),lambda view:True)
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        self.witness = SessionWitness(self.registry,self.provider,process,'4'*32)
+        self.lease = self.witness.acquire()
         self.packets = encode_click(Point(20,30),ClientBounds(500,500))
         self.api = FakeApi()
         for patcher in (mock.patch.object(live_input,'_NativeApi',return_value=self.api),
@@ -39,7 +51,48 @@ class InputFrameEvidenceTests(unittest.TestCase):
     def backend(self):
         return live_input.LiveInputBackend(identity(),self.packets,'ffmpeg.exe','a'*64)
     def dispatch(self, backend):
-        return self.history.execute_once('2'*32,self.packets,backend,expected_observation={'mode':'cas'})
+        return registered_input.execute_once(self.registry,self.history,'2'*32,self.packets,backend,
+                                             expected_observation={'mode':'cas'},witness=self.witness)
+    def test_different_backend_for_same_target_is_refused(self):
+        with self.backend() as original:
+            self.dispatch(original)
+            with self.backend() as foreign:
+                with self.assertRaises(FoundryError):
+                    input_frame_evidence.capture(self.history,'2'*32,foreign,self.root/'evidence')
+        self.assertFalse((self.root/'evidence').exists())
+    def test_replaced_recorder_or_epoch_is_refused(self):
+        with self.backend() as backend:
+            self.dispatch(backend)
+            original = backend._recorder
+            backend._recorder = object()
+            with self.assertRaises(FoundryError):
+                input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+            backend._recorder = original
+            epoch = backend._frame_epoch
+            backend._frame_epoch = object()
+            with self.assertRaises(FoundryError):
+                input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+            backend._frame_epoch = epoch
+        self.assertFalse((self.root/'evidence').exists())
+    def test_direct_journal_dispatch_has_no_registered_binding(self):
+        with self.backend() as backend:
+            self.history.execute_once('2'*32,self.packets,backend,expected_observation={'mode':'cas'})
+            with self.assertRaises(FoundryError):
+                input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+        self.assertFalse((self.root/'evidence').exists())
+    def test_changed_plan_after_dispatch_is_refused(self):
+        with self.backend() as backend:
+            self.dispatch(backend)
+            backend._packets = encode_click(Point(40,40),ClientBounds(500,500))
+            with self.assertRaises(FoundryError):
+                input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+        self.assertFalse((self.root/'evidence').exists())
+    def test_plan_mismatch_refused_before_registry_attempt(self):
+        with self.backend() as backend:
+            backend._packets = encode_click(Point(40,40),ClientBounds(500,500))
+            with self.assertRaises(FoundryError): self.dispatch(backend)
+        self.assertEqual([],self.api.posts)
+        self.assertEqual('resolved',self.registry.inspect()['events'][-1]['kind'])
     def test_frame_is_saved_without_acknowledging_or_claiming_causality(self):
         with self.backend() as backend:
             self.assertEqual('awaiting_readback',self.dispatch(backend)['state'])

@@ -53,6 +53,32 @@ class LiveInputBackend:
         self._held, self._release_attempted, self._uncertain = False, False, False
         self._next, self._last_point = 0, self._packets[0].lparam
         self._frame_epoch, self._frame_sequence, self._frame_time = None, None, None
+        self._evidence_binding = None
+        self._evidence_completed = False
+
+    def _bind_evidence(self, journal_sha256, session_id, request_id, intent_sha256, target, packets):
+        """Correlate one registered attempt with this instance in the trusted host."""
+        self._context()
+        _require(self._evidence_binding is None, 'frame_binding', 'This sender is already bound to an attempt.')
+        windows.same_identity(self._expected, target)
+        plan = tuple(_packet(packet) for packet in packets)
+        _require(plan == self._packets and self._recorder is not None and self._frame_epoch is not None,
+                 'frame_binding', 'The registered packet plan or recorder differs from this sender.')
+        self._evidence_binding = (journal_sha256, session_id, request_id, intent_sha256,
+                                  self._recorder, self._frame_epoch, plan)
+
+    def _require_evidence_binding(self, journal_sha256, session_id, request_id, intent_sha256, target, *, completed=True):
+        self._context()
+        windows.same_identity(self._expected, target)
+        binding = self._evidence_binding
+        _require(binding is not None and binding[:4] == (journal_sha256, session_id, request_id, intent_sha256)
+                 and binding[4] is self._recorder and binding[5] is self._frame_epoch
+                 and binding[6] == self._packets and (not completed or self._evidence_completed),
+                 'frame_binding', 'The original registered sender, plan, or recorder is unavailable.')
+
+    def _complete_evidence_binding(self, journal_sha256, session_id, request_id, intent_sha256, target):
+        self._require_evidence_binding(journal_sha256, session_id, request_id, intent_sha256, target, completed=False)
+        self._evidence_completed = True
 
     def _context(self):
         _require(self._stack is not None, "input_context", "The original input context is not held.")

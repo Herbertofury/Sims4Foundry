@@ -1,10 +1,12 @@
-"""Record a passive frame from the original sender's active recorder.
+"""Record passive frame evidence correlated within the trusted sender host.
 
 This is observational evidence only. A received frame timestamp is not a
 capture timestamp, action causality, authenticated semantic state or consent
 to acknowledge a journal request. It sends no input and accesses no profile.
+Binding does not authenticate hostile code in the host. Output path checks and
+separate file reads do not exclude concurrent replacement or establish a receipt.
 """
-from . import companion_build, input_journal
+from . import companion_build, input_journal, registered_input
 from .errors import FoundryError
 from .io import digest, external_path, lock, new_json, sha256
 from .live_input import LiveInputBackend
@@ -26,8 +28,14 @@ def capture(journal, request_id, backend, destination):
         original = journal._status(request_id)
         if original['state'] != 'awaiting_readback':
             raise FoundryError('input_unresolved', 'A completed original request awaiting readback is required.')
+        binding = (registered_input.journal_binding(journal), journal.session['session_id'], request_id,
+                   original['intent_sha256'], journal.session['target'])
+        backend._require_evidence_binding(*binding)
         same_identity(journal.session['target'],backend.observe())
         frame = backend.sample_frame()
+        backend._require_evidence_binding(*binding)
+        if frame.epoch is not backend._frame_epoch:
+            raise FoundryError('frame_binding', 'The sampled frame is from a different recorder epoch.')
         same_identity(journal.session['target'],backend.observe())
         output.mkdir(parents=True,exist_ok=False)
         intent = {'schema':1,'request_id':request_id,'session_id':journal.session['session_id'],
@@ -43,6 +51,7 @@ def capture(journal, request_id, backend, destination):
         current = journal._status(request_id)
         if current['state'] != 'awaiting_readback' or current['intent_sha256'] != original['intent_sha256']:
             raise FoundryError('frame_binding', 'Original input history changed during capture.')
+        backend._require_evidence_binding(*binding)
         result = {'schema':1,'outcome':'frame_recorded','request_id':request_id,
                   'intent_sha256':original['intent_sha256'],'evidence_intent_sha256':digest(intent),
                   'frame_sha256':frame.sha256,'frame_sequence':frame.sequence,

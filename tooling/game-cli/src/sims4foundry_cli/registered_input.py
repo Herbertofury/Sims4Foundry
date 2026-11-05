@@ -110,13 +110,18 @@ def execute_once(registry, journal, request_id, packets, backend, *, expected_ob
         raise FoundryError('witness_binding', 'The original retained session witness is required.')
     with witness.guard_for_dispatch(registry) as check_live:
         wrapped = _WitnessBoundBackend(backend, check_live, target['hwnd'], packets)
+        if type(backend) is LiveInputBackend:
+            binding = (journal_binding(journal), journal.session['session_id'], request_id, expected_hash, target)
+            backend._bind_evidence(*binding, packets)
         registry.begin(request_id, 'input', expected_hash)
         # Any failure, including one before native dispatch, leaves the shared
         # gate unresolved. A fresh handle check immediately precedes each post.
         result = journal.execute_once(request_id, packets, wrapped,
                                       expected_observation=expectation)
-    if result.get('intent_sha256') != expected_hash:
-        raise FoundryError('registry_binding', 'Journal returned a different intent; do not replay.')
+        if result.get('intent_sha256') != expected_hash:
+            raise FoundryError('registry_binding', 'Journal returned a different intent; do not replay.')
+        if type(backend) is LiveInputBackend and result.get('state') == 'awaiting_readback':
+            backend._complete_evidence_binding(*binding)
     return result
 
 

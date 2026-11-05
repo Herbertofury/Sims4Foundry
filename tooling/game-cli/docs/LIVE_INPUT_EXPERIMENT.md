@@ -31,11 +31,18 @@ independent inspector only for the test's own PID, image and window; its key is
 DPAPI-protected and its SQLite anchor is cooperative. It leaves the journal
 awaiting readback and preserves the original fixture evidence directory; set
 `FOUNDRY_REGISTERED_FIXTURE_ROOT` to select its existing parent directory.
-`input_frame_evidence.capture` can also store one validated frame from the
-same active recorder, bound to the original pending journal intent. Its PNG,
-intent and completion receipt are retained locally. The operation sends no
-input and does not acknowledge the journal; it records receipt time only and
-does not establish capture time, causality, semantic state or game qualification.
+`input_frame_evidence.capture` can store a validated frame from the backend
+instance used for the original registered input. The trusted in-process owner
+correlates the journal location, request, intent, packet plan, recorder object
+and epoch before dispatch, then requires a completed `awaiting_readback`
+result. It refuses a different backend or recorder. This is not authentication
+against hostile same-user or in-process code. The recorder may return its last
+existing frame. The operation sends no input and does not acknowledge the
+journal; receipt time does not establish capture time, causality, semantic
+state or game qualification. A failed write or lost response may leave an
+intent, PNG or completed receipt; inspect the original output and do not repeat
+input. There is no dedicated evidence reconciliation command. Separate
+path-based hash and PNG reads do not exclude concurrent replacement.
 The parent is checked for named game/profile paths and existing reparse points
 before directory creation, but this path-based check does not prevent a
 concurrent replacement. Fixture records include local process and path details;
