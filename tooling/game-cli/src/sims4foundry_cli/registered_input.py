@@ -4,11 +4,13 @@ The registry and observer remain trusted experimental providers. This module
 does not establish a canonical authority, verify game semantics or open a game.
 """
 from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import PureWindowsPath
 
 from . import capture_pin, companion_build, input_journal
 from .errors import FoundryError
 from .io import canonical, digest, lock
+from .input_packets import CoordinateSpace, Message
 from .session_registry import SessionRegistry, _lifetime
 from .session_witness import SessionWitness
 
@@ -43,13 +45,37 @@ def _check(registry, journal):
 
 
 class _WitnessBoundBackend:
-    def __init__(self, backend, check_live):
+    def __init__(self, backend, check_live, hwnd, packets):
         self._backend, self._check_live = backend, check_live
+        self._held = False
+        self._hwnd = hwnd
+        self._release = packets[-1] if packets[-1].release_intent else None
+        self._last_point = packets[0].lparam
     def __getattr__(self, name):
         return getattr(self._backend, name)
     def post(self, hwnd, packet):
+        if type(hwnd) is not int or hwnd != self._hwnd:
+            raise FoundryError('ownership_changed', 'Only the originally bound window may receive input.')
+        if packet.release_intent and not self._held:
+            raise FoundryError('invalid_release', 'No original input reached the backend.')
+        if packet.release_intent:
+            expected = self._release
+            if expected is not None and expected.coordinate_space is not CoordinateSpace.NONE:
+                expected = replace(expected, lparam=self._last_point)
+            if packet != expected:
+                raise FoundryError('invalid_release', 'Release differs from the original packet plan.')
         self._check_live()
-        return self._backend.post(hwnd, packet)
+        down = packet.message in (Message.LEFT_DOWN, Message.RIGHT_DOWN, Message.KEY_DOWN)
+        if down:
+            self._held = True
+        if not packet.release_intent:
+            self._last_point = packet.lparam
+        if packet.release_intent:
+            self._held = False
+        result = self._backend.post(hwnd, packet)
+        if down and result is False:
+            self._held = False
+        return result
 
 
 def execute_once(registry, journal, request_id, packets, backend, *, expected_observation, witness):
@@ -69,7 +95,7 @@ def execute_once(registry, journal, request_id, packets, backend, *, expected_ob
         registry.begin(request_id, 'input', expected_hash)
         # Any failure, including one before native dispatch, leaves the shared
         # gate unresolved. A fresh handle check immediately precedes each post.
-        result = journal.execute_once(request_id, packets, _WitnessBoundBackend(backend, check_live),
+        result = journal.execute_once(request_id, packets, _WitnessBoundBackend(backend, check_live, target['hwnd'], packets),
                                       expected_observation=expectation)
     if result.get('intent_sha256') != expected_hash:
         raise FoundryError('registry_binding', 'Journal returned a different intent; do not replay.')

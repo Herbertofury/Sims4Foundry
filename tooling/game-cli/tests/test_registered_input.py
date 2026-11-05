@@ -82,6 +82,27 @@ class RegisteredInputTests(unittest.TestCase):
         result = self.execute()
         self.assertEqual('unresolved', result['state'])
         self.assertEqual([], self.backend.posts)
+    def test_failed_witness_preflight_cannot_post_unpaired_release(self):
+        calls = []
+        def check():
+            calls.append(1)
+            if len(calls) == 1: raise FoundryError('process_lifetime_unresolved', 'fixture')
+            return True
+        wrapped = registered_input._WitnessBoundBackend(self.backend, check, 100, self.packets)
+        with self.assertRaises(FoundryError): wrapped.post(100, self.packets[0])
+        with self.assertRaises(FoundryError): wrapped.post(100, self.packets[-1])
+        self.assertEqual([], self.backend.posts)
+    def test_lost_down_reply_still_allows_one_original_release(self):
+        def lose_down(packet):
+            if not packet.release_intent: raise OSError('lost downstream reply')
+            return True
+        self.backend.failure = lose_down
+        wrapped = registered_input._WitnessBoundBackend(self.backend, lambda:True, 100, self.packets)
+        with self.assertRaises(OSError): wrapped.post(100, self.packets[0])
+        with self.assertRaises(FoundryError): wrapped.post(101, self.packets[-1])
+        self.assertTrue(wrapped.post(100, self.packets[-1]))
+        with self.assertRaises(FoundryError): wrapped.post(100, self.packets[-1])
+        self.assertEqual([self.packets[0],self.packets[-1]], [packet for _,packet in self.backend.posts])
     def test_closed_witness_blocks_dispatch_even_after_anchored_acquisition(self):
         self.lease.close()
         with self.assertRaises(FoundryError): self.execute()

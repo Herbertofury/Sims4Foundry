@@ -211,6 +211,8 @@ class LiveInputBackend:
             _require(0 <= time.monotonic()-start <= MAX_POST_PREFLIGHT,
                      "stale_observation", "Packet preflight exceeded its time budget.")
             self.foreground()
+            _require(0 <= time.monotonic()-start <= MAX_POST_PREFLIGHT,
+                     "stale_observation", "Final foreground check exceeded the preflight time budget.")
             if packet.message in (Message.LEFT_DOWN,Message.RIGHT_DOWN,Message.KEY_DOWN):
                 self._held = True
             self._last_point = packet.lparam

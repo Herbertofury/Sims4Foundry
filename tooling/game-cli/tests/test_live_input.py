@@ -144,6 +144,21 @@ class LiveInputTests(unittest.TestCase):
             self.assertEqual('unresolved', self.run_once(backend)['state'])
         self.assertEqual([], self.api.posts)
 
+    def test_delayed_final_foreground_check_prevents_post(self):
+        with self.backend() as backend:
+            clock = [100.0]
+            def foreground():
+                clock[0] += .3
+                return 12
+            with (mock.patch.object(live_input, 'time', SimpleNamespace(monotonic=lambda:clock[0])),
+                  mock.patch.object(backend, 'foreground', side_effect=foreground),
+                  mock.patch.object(backend, 'verify_recording', return_value=True),
+                  mock.patch.object(backend, 'verify_input_context', return_value=True)):
+                with self.assertRaises(FoundryError) as error:
+                    backend.post(100, self.packets[0])
+            self.assertEqual('stale_observation', error.exception.code)
+        self.assertEqual([], self.api.posts)
+
     def test_ownership_change_before_dispatch_does_not_post(self):
         with self.backend() as backend:
             self.api.owned = False

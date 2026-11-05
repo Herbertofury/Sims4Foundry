@@ -25,6 +25,10 @@ controller; it does not prove when the game presented the frame or that a UI
 change followed a particular input. Visual matching alone must not be treated
 as an atomic action acknowledgement. No release can be guaranteed after loss
 of ownership, process exit, crash or an unknown native result.
+The preflight deadline is checked again after the final foreground call, but
+the target, foreground or scene may still change before the non-atomic post.
+The registered wrapper also refuses to send a release when its matching down
+never reached the backend.
 
 Do not enable dependent controls, normal exit, or a production CLI route on
 the strength of these fixtures. Integration requires a shared session authority,
