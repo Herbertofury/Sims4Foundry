@@ -56,7 +56,7 @@ class WgcOwnedWindowTests(unittest.TestCase):
         name='FoundryWgcFixture'+uuid.uuid4().hex
         ready, done, stop = threading.Event(), threading.Event(), threading.Event()
         lifetime_lock = threading.Lock()
-        state={'window':None,'error':None,'clicked':False,'events':[],'destroyed':True,'unregistered':True}
+        state={'window':None,'error':None,'clicked':False,'marker':False,'events':[],'destroyed':True,'unregistered':True}
         @WNDPROC
         def callback(hwnd,message,wparam,lparam):
             tracked = (Message.LEFT_DOWN,Message.LEFT_UP)
@@ -75,7 +75,8 @@ class WgcOwnedWindowTests(unittest.TestCase):
             if message == 0x000F:  # WM_PAINT for this owned fixture
                 paint=PAINTSTRUCT(); dc=begin_paint(hwnd,ctypes.byref(paint)); rect=wt.RECT()
                 if dc and client_rect(hwnd,ctypes.byref(rect)):
-                    fill(dc,ctypes.byref(rect),white if state['clicked'] else black)
+                    brush = black if state['marker'] and state['clicked'] else white if state['clicked'] or state['marker'] else black
+                    fill(dc,ctypes.byref(rect),brush)
                 end_paint(hwnd,ctypes.byref(paint))
                 return 0
             return default(hwnd,message,wparam,lparam)
@@ -110,6 +111,11 @@ class WgcOwnedWindowTests(unittest.TestCase):
             if state['error']: raise state['error']
             with lifetime_lock:
                 self.assertFalse(done.is_set(),'Owned capture window already stopped')
+                if os.environ.get('FOUNDRY_WGC_TEE_PROBE') == '1':
+                    from wgc_tee_probe import run_owned
+                    run_owned(self,state['window'],state,invalidate,
+                              os.environ['FOUNDRY_WGC_TEST_FFMPEG'],os.environ['FOUNDRY_WGC_TEST_SHA256'])
+                    return
                 target=identity(); target['hwnd']=state['window']
                 recorder=WgcRecorder(target,os.environ['FOUNDRY_WGC_TEST_FFMPEG'],
                                      os.environ['FOUNDRY_WGC_TEST_SHA256'],
