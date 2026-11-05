@@ -28,22 +28,31 @@ def _stop_or_retain(thread, stop, state, unresolved):
     return not thread.is_alive() and state['destroyed'] and state['unregistered']
 
 
-def _ensure_distinct_fixture(hwnd):
+def _ensure_distinct_fixture(hwnd, bound_previous=None):
     """Compare recorded values only; never query or operate on the old process."""
     if os.environ.get('FOUNDRY_WGC_OWNER_SEQUENCE_TEST') != '1':
         return
     if (os.environ.get('FOUNDRY_WGC_REGISTERED_TEST') != '1'
             or os.environ.get('FOUNDRY_WGC_LIVE_OWNER_TEST') != '1'
             or os.environ.get('FOUNDRY_WGC_LIVE_SERVICE_TEST') == '1'
-            or os.environ.get('FOUNDRY_WGC_TEE_PROBE') == '1'):
+            or os.environ.get('FOUNDRY_WGC_TEE_PROBE') == '1'
+            or os.environ.get('FOUNDRY_WGC_ACTION','click') != 'click'):
         raise FoundryError('fixture_isolation', 'The registered owner sequence fixture must be selected exactly.')
     old_pid = os.environ.get('FOUNDRY_WGC_PREVIOUS_PID','')
     old_hwnd = os.environ.get('FOUNDRY_WGC_PREVIOUS_HWND','')
+    if (bound_previous is not None and (old_pid,old_hwnd) != bound_previous):
+        raise FoundryError('fixture_isolation', 'The prior fixture binding changed.')
     if (not old_pid.isascii() or not old_pid.isdecimal() or not old_hwnd.isascii()
             or not old_hwnd.isdecimal() or int(old_pid) <= 0 or int(old_hwnd) <= 0
             or type(hwnd) is not int or hwnd <= 0 or os.getpid() == int(old_pid)
             or hwnd == int(old_hwnd)):
         raise FoundryError('fixture_isolation', 'A new process and window distinct from the original fixture are required.')
+
+
+def _initial_recorder_retention(recorder, cleanup_confirmed, hwnd):
+    # No cleanup call is made here. A lost/failed close result keeps the exact
+    # window, even if a late worker may already have released its resources.
+    return [] if recorder is None or cleanup_confirmed is True else [{'hwnd':hwnd}]
 
 
 def _fixture_service_retentions(entries, hwnd):
@@ -68,6 +77,17 @@ class WgcFixtureOwnershipTests(unittest.TestCase):
                 with self.assertRaises(FoundryError): _ensure_distinct_fixture(26)
             with mock.patch.dict(os.environ,{'FOUNDRY_WGC_LIVE_SERVICE_TEST':'1'}):
                 with self.assertRaises(FoundryError): _ensure_distinct_fixture(26)
+            with self.assertRaises(FoundryError): _ensure_distinct_fixture(26,('19','25'))
+            with mock.patch.dict(os.environ,{'FOUNDRY_WGC_ACTION':'key'}):
+                with self.assertRaises(FoundryError): _ensure_distinct_fixture(26)
+
+    def test_initial_recorder_uncertainty_retains_original_window(self):
+        class Recorder:
+            def close(self): raise AssertionError('Must not repeat uncertain close')
+        recorder = Recorder()
+        self.assertEqual([{'hwnd':123}],_initial_recorder_retention(recorder,False,123))
+        self.assertEqual([], _initial_recorder_retention(recorder,True,123))
+        self.assertEqual([], _initial_recorder_retention(None,False,123))
 
     def test_service_retention_uses_original_or_unknown_window_binding(self):
         rows = _fixture_service_retentions([{'fixture_hwnd':123},{'fixture_hwnd':456}, {}, None],123)
@@ -123,6 +143,10 @@ class WgcOwnedWindowTests(unittest.TestCase):
         unregister = bind(user,'UnregisterClassW',wt.BOOL,[wt.LPCWSTR,wt.HINSTANCE])
         name='FoundryWgcFixture'+uuid.uuid4().hex
         ready, done, stop = threading.Event(), threading.Event(), threading.Event()
+        bound_previous = (os.environ.get('FOUNDRY_WGC_PREVIOUS_PID',''),
+                          os.environ.get('FOUNDRY_WGC_PREVIOUS_HWND',''))
+        def require_isolation(hwnd):
+            _ensure_distinct_fixture(hwnd,bound_previous)
         lifetime_lock = threading.Lock()
         state={'window':None,'error':None,'clicked':False,'marker':False,'events':[],'destroyed':True,'unregistered':True}
         @WNDPROC
@@ -174,12 +198,13 @@ class WgcOwnedWindowTests(unittest.TestCase):
         thread=threading.Thread(target=owner,daemon=True); thread.start()
         recorder=None
         close_attempted=False
+        recorder_cleanup_confirmed=False
         try:
             self.assertTrue(ready.wait(5),'Capture fixture did not start')
             if state['error']: raise state['error']
             with lifetime_lock:
                 self.assertFalse(done.is_set(),'Owned capture window already stopped')
-                _ensure_distinct_fixture(state['window'])
+                require_isolation(state['window'])
                 if os.environ.get('FOUNDRY_WGC_TEE_PROBE') == '1':
                     from wgc_tee_probe import run_owned
                     run_owned(self,state['window'],state,invalidate,
@@ -209,10 +234,11 @@ class WgcOwnedWindowTests(unittest.TestCase):
                 self.assertTrue(all(value <= 10 for value in before_pixel[:3]),'Fixture did not begin black')
                 if os.environ.get('FOUNDRY_WGC_REGISTERED_TEST') == '1':
                     close_attempted=True
-                    self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
+                    recorder_cleanup_confirmed = recorder.close() is True
+                    self.assertTrue(recorder_cleanup_confirmed,'Owned capture process cleanup was unresolved')
                     from registered_owned_fixture import run_owned
                     run_owned(self,state['window'],name,state,os.environ['FOUNDRY_WGC_TEST_FFMPEG'],
-                              os.environ['FOUNDRY_WGC_TEST_SHA256'],_ensure_distinct_fixture)
+                              os.environ['FOUNDRY_WGC_TEST_SHA256'],require_isolation)
                 else:
                     # The ordinary opt-in fixture checks raw posting plus WGC.
                     native = _NativeApi()
@@ -236,17 +262,19 @@ class WgcOwnedWindowTests(unittest.TestCase):
                     self.assertEqual([(int(packet.message),packet.wparam,packet.lparam) for packet in packets],
                                      state['events'])
                     close_attempted=True
-                    self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
+                    recorder_cleanup_confirmed = recorder.close() is True
+                    self.assertTrue(recorder_cleanup_confirmed,'Owned capture process cleanup was unresolved')
         finally:
             try:
                 if recorder is not None and not close_attempted and not recorder._cancel.is_set():
                     close_attempted=True
-                    self.assertTrue(recorder.close(),'Owned capture process cleanup was unresolved')
+                    recorder_cleanup_confirmed = recorder.close() is True
+                    self.assertTrue(recorder_cleanup_confirmed,'Owned capture process cleanup was unresolved')
             finally:
                 unresolved = []
                 if os.environ.get('FOUNDRY_WGC_TEE_PROBE') == '1':
                     from wgc_tee_probe import _UNRESOLVED
-                    unresolved = _UNRESOLVED
+                    unresolved = list(_UNRESOLVED)
                 elif os.environ.get('FOUNDRY_WGC_REGISTERED_TEST') == '1':
                     from registered_owned_fixture import _OWNED_UNRESOLVED
                     unresolved = [{'hwnd':item[4]} for item in _OWNED_UNRESOLVED if len(item) > 4]
@@ -254,6 +282,7 @@ class WgcOwnedWindowTests(unittest.TestCase):
                         from sims4foundry_cli.independent_live_service import _UNRESOLVED as service_unresolved
                         # A malformed/missing binding is not proof this window is free.
                         unresolved += _fixture_service_retentions(service_unresolved,state['window'])
+                unresolved += _initial_recorder_retention(recorder,recorder_cleanup_confirmed,state['window'])
                 if not _stop_or_retain(thread,stop,state,unresolved) or not done.is_set():
                     raise AssertionError('Owned capture window or thread cleanup is unresolved')
 
