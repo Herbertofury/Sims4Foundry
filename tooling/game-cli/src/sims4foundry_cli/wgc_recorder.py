@@ -122,6 +122,7 @@ class WgcRecorder:
         self._state, self._pin, self._process, self._worker = "new", None, None, None
         self._pin_active = False
         self._pin_cleanup_failed = False
+        self._pin_enter_state = "not_started"
         self._cleanup_attempted = False
         self._spawn_state = "not_started"
         self._starter, self._start_error = None, False
@@ -146,14 +147,18 @@ class WgcRecorder:
         self._state = "starting"
         try:
             self._pin = self._pin_factory(str(self._ffmpeg), self._hash)
+            self._pin_enter_state = "entering"
             try:
                 self._pin.__enter__()
+                self._pin_active = True
+                self._pin_enter_state = "entered"
             except BaseException as error:
                 if not isinstance(error, FoundryError) or error.code != "capture_tool_identity":
                     self._pin_cleanup_failed = True
                     _retain_unresolved(self)
+                else:
+                    self._pin_enter_state = "not_entered"
                 raise
-            self._pin_active = True
             self._observe()
             command = [str(self._ffmpeg), "-nostdin", "-hide_banner", "-loglevel", "error",
                        "-f", "lavfi", "-i",
@@ -193,9 +198,14 @@ class WgcRecorder:
             self._state = "running"
         except BaseException as error:
             self._cancel.set()
-            with self._cleanup_lock:
+            if not self._cleanup_lock.acquire(timeout=CLEANUP_TIMEOUT):
+                _retain_unresolved(self)
+                _fail("recording_cleanup_unresolved", "Recorder cleanup ownership is unavailable.")
+            try:
                 if self._state != "closed":
                     self._state = "failed"
+            finally:
+                self._cleanup_lock.release()
             if not self.close():
                 _fail("recording_cleanup_unresolved", "Recorder startup cleanup is unresolved.")
             if not isinstance(error, Exception):
@@ -285,12 +295,20 @@ class WgcRecorder:
         if self._starter is not None and self._starter.is_alive():
             self._starter.join(timeout=CLEANUP_TIMEOUT)
             if self._starter.is_alive():
-                with self._cleanup_lock:
+                if not self._cleanup_lock.acquire(timeout=CLEANUP_TIMEOUT):
+                    _retain_unresolved(self)
+                    return False
+                try:
                     if self._state == "closed":
                         return True
                     _retain_unresolved(self)
                     return False
-        with self._cleanup_lock:
+                finally:
+                    self._cleanup_lock.release()
+        if not self._cleanup_lock.acquire(timeout=CLEANUP_TIMEOUT):
+            _retain_unresolved(self)
+            return False
+        try:
             try:
                 result = self._cleanup()
             except BaseException:
@@ -299,3 +317,5 @@ class WgcRecorder:
             if not result:
                 _retain_unresolved(self)
             return result
+        finally:
+            self._cleanup_lock.release()

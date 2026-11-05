@@ -26,6 +26,10 @@ open. An uncertain cleanup is not silently repeated or reported as complete;
 process termination ends that in-memory ownership and is not restart recovery.
 An entry-time pin cleanup failure also remains unresolved. If termination of
 the owned recorder does not complete in time, no second termination is issued.
+Interruption during pin entry is treated as uncertain, and lock acquisition is
+bounded. Python cannot forcibly bound a stalled native cleanup call. A fixture
+interrupted before it invokes its latched close may retain a quarantined child
+instead of proving cleanup.
 
 This is not yet a supported CLI operation or game-qualified provider. A native
 queue acceptance is not delivery, state transition or semantic success. The

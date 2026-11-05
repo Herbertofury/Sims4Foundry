@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 import base64
 import io
+import inspect
 import struct
 import subprocess
 import sys
@@ -274,6 +275,42 @@ class RecorderTests(unittest.TestCase):
         with recorder._QUARANTINE_LOCK:
             self.assertIn(self.recorder,recorder._QUARANTINE)
             recorder._QUARANTINE.discard(self.recorder)
+    def test_interruption_after_pin_enter_retains_unknown_ownership(self):
+        lines, first = inspect.getsourcelines(recorder.WgcRecorder.start)
+        target = first + next(index for index,line in enumerate(lines) if 'self._pin_active = True' in line)
+        def trace(frame, event, arg):
+            if frame.f_code is recorder.WgcRecorder.start.__code__ and event == 'line' and frame.f_lineno == target:
+                raise KeyboardInterrupt('synthetic post-enter interruption')
+            return trace
+        sys.settrace(trace)
+        try:
+            with self.assertRaises(FoundryError) as error: self.recorder.start()
+        finally:
+            sys.settrace(None)
+        self.assertEqual('recording_cleanup_unresolved',error.exception.code)
+        self.assertTrue(self.pinned)
+        with recorder._QUARANTINE_LOCK:
+            self.assertIn(self.recorder,recorder._QUARANTINE)
+            recorder._QUARANTINE.discard(self.recorder)
+        self.recorder._pin.__exit__(None,None,None)  # synthetic pin only
+    def test_busy_cleanup_lock_returns_unresolved_without_blocking(self):
+        ready, release = threading.Event(), threading.Event()
+        def hold():
+            with self.recorder._cleanup_lock:
+                ready.set()
+                release.wait(1)
+        worker = threading.Thread(target=hold)
+        worker.start()
+        try:
+            self.assertTrue(ready.wait(1))
+            with mock.patch.object(recorder, 'CLEANUP_TIMEOUT', .01):
+                self.assertFalse(self.recorder.close())
+            with recorder._QUARANTINE_LOCK:
+                self.assertIn(self.recorder,recorder._QUARANTINE)
+        finally:
+            release.set()
+            worker.join(timeout=1)
+        self.assertTrue(self.recorder.close())
     def test_wrong_thread_does_not_start_helper(self):
         errors=[]
         def other():
