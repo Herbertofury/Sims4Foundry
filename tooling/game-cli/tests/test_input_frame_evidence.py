@@ -1,5 +1,8 @@
 """Passive same-recorder frame evidence using only synthetic providers."""
 import hashlib
+import io
+import json
+from contextlib import redirect_stdout
 from pathlib import Path
 import tempfile
 import time
@@ -7,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from sims4foundry_cli import input_frame_evidence, input_journal, live_input, registered_input, visual_probe
+from sims4foundry_cli import frame_evidence_cli, input_frame_evidence, input_journal, live_input, registered_input, visual_probe
 from sims4foundry_cli.errors import FoundryError
 from sims4foundry_cli.input_packets import ClientBounds, Point, encode_click
 from sims4foundry_cli.wgc_recorder import Frame
@@ -206,6 +209,39 @@ class InputFrameEvidenceTests(unittest.TestCase):
                 return result
             with mock.patch.object(visual_probe,'compare',side_effect=change_during_compare):
                 with self.assertRaises(FoundryError): input_frame_evidence.compare(*different)
+    def test_read_only_cli_inspects_and_compares_original_evidence(self):
+        with self.backend() as backend:
+            self.dispatch(backend)
+            input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+        args = ['--journal',str(self.root/'journal'),'--request-id','2'*32,'--evidence',str(self.root/'evidence')]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0,frame_evidence_cli.main(['inspect',*args]))
+        observed = json.loads(output.getvalue())
+        self.assertEqual('matching_files_observed',observed['state'])
+        reference = self.root/'reference.png'
+        reference.write_bytes(png())
+        compare_args = ['--frame-sha256',observed['frame_sha256'],
+                        '--evidence-intent-sha256',observed['evidence_intent_sha256'],
+                        '--reference',str(reference),'--reference-sha256',hashlib.sha256(png()).hexdigest(),
+                        '--region','0','0','2','2']
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0,frame_evidence_cli.main(['compare',*args,*compare_args]))
+        self.assertTrue(json.loads(output.getvalue())['matched'])
+        self.assertEqual('awaiting_readback',self.history.status('2'*32)['state'])
+        self.assertEqual(2,len(self.api.posts))
+    def test_cli_incomplete_evidence_and_invalid_journal_have_nonzero_results(self):
+        with self.backend() as backend:
+            self.dispatch(backend)
+        args = ['inspect','--journal',str(self.root/'journal'),'--request-id','2'*32,
+                '--evidence',str(self.root/'missing')]
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(1,frame_evidence_cli.main(args))
+        self.assertEqual('incomplete_or_unavailable',json.loads(output.getvalue())['state'])
+        args[2] = str(self.root/'unknown-journal')
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(2,frame_evidence_cli.main(args))
     def test_invalid_frame_is_refused_before_output(self):
         with self.backend() as backend:
             self.dispatch(backend)

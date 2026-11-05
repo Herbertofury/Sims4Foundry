@@ -44,7 +44,18 @@ intent, PNG or completed receipt; inspect the original output and do not repeat
 input. `input_frame_evidence.inspect` is a read-only Python API that inspects
 the original journal and evidence directory, reporting missing files or a
 matching set. It neither resolves the journal nor restores an incomplete
-sender binding; there is no CLI command or qualified recovery protocol yet.
+sender binding; there is no qualified recovery protocol yet.
+The read-only inspection and pixel comparison are also available without the
+session owner through these module commands (they never send input):
+
+```text
+python -m sims4foundry_cli.frame_evidence_cli inspect --journal JOURNAL --request-id REQUEST_ID --evidence EVIDENCE_DIRECTORY
+python -m sims4foundry_cli.frame_evidence_cli compare --journal JOURNAL --request-id REQUEST_ID --evidence EVIDENCE_DIRECTORY --frame-sha256 FRAME_SHA256 --evidence-intent-sha256 INTENT_SHA256 --reference REFERENCE.png --reference-sha256 REFERENCE_SHA256 --region X Y WIDTH HEIGHT
+```
+
+Inspection returns status 0 for matching observed files, 1 for missing or
+unavailable files, and 2 for an error. Comparison returns 0 for a pixel match,
+1 for a mismatch, and 2 for an error. These commands do not recover a sender.
 Its observations are not an atomic snapshot and do not authenticate files.
 `input_frame_evidence.compare` can compare a region against an explicitly
 hash-pinned reference, using caller-supplied frame and evidence-intent hashes.
