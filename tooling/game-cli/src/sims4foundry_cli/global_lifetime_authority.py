@@ -172,12 +172,13 @@ def claim_bound(registry, journal, witness):
         raise FoundryError('global_witness_binding', 'Original registry, journal and witness are required.')
     target = input_journal._target(journal.session['target'])
     identity = {key:target[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
-    events = registered_input._check(registry,journal)
-    if (canonical(witness._identity) != canonical(identity) or len(events) != 1
-            or events[0].get('kind') != 'session' or journal._runs()):
-        raise FoundryError('global_session_unresolved', 'An unused matching owner and session are required.')
-    reservation = claim(target,journal.session['session_id'],witness._request,registered_input.journal_binding(journal))
-    return BoundClaim(registry,journal,witness,reservation)
+    with witness.guard_for_claim(registry):
+        events = registered_input._check(registry,journal)
+        if (canonical(witness._identity) != canonical(identity) or len(events) != 1
+                or events[0].get('kind') != 'session' or journal._runs()):
+            raise FoundryError('global_session_unresolved', 'An unused matching owner and session are required.')
+        reservation = claim(target,journal.session['session_id'],witness._request,registered_input.journal_binding(journal))
+        return BoundClaim(registry,journal,witness,reservation)
 
 
 def attach_witness(registry, journal, witness, claim_ticket):

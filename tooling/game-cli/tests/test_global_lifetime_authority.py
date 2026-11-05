@@ -154,6 +154,31 @@ class GlobalLifetimeAuthorityTests(unittest.TestCase):
         self.assertFalse(observed['current_witness_verified'])
         self.assertFalse(observed['registry_gate_verified'])
 
+    def test_claim_excludes_reentrant_and_foreign_thread_acquisition(self):
+        journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
+        (self.root/'registry').mkdir()
+        registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
+        registry.open_session('1'*32,registered_input.journal_binding(journal))
+        provider = RetainedProcessRegistry(FakeWitnessApi(),lambda view:True)
+        process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
+        witness = SessionWitness(registry,provider,process,'2'*32)
+        def foreign_claim():
+            with self.assertRaises(FoundryError) as error: authority.claim_bound(registry,journal,witness)
+            return error.exception.code
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            self.assertEqual('witness_busy',pool.submit(foreign_claim).result())
+        self.assertEqual(1,len(registry.inspect()['events']))
+        publish = authority.new_json
+        def reenter(path,row):
+            with self.assertRaises(FoundryError) as error: witness.acquire()
+            self.assertEqual('witness_busy',error.exception.code)
+            self.assertEqual(1,len(registry.inspect()['events']))
+            return publish(path,row)
+        with mock.patch.object(authority,'new_json',side_effect=reenter):
+            ticket = authority.claim_bound(registry,journal,witness)
+        self.assertIs(ticket._witness,witness)
+        self.assertEqual(1,len(registry.inspect()['events']))
+
     def test_wrong_witness_cannot_attach_to_reserved_session(self):
         journal = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
         (self.root/'registry').mkdir()

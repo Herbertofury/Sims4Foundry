@@ -1,6 +1,7 @@
 """Experimental binding between the shared ledger and retained witness owner."""
 from copy import deepcopy
 from contextlib import contextmanager
+import threading
 
 from .errors import FoundryError
 from .io import canonical, digest
@@ -20,6 +21,7 @@ class SessionWitness:
         if type(registry) is not SessionRegistry or type(provider) is not RetainedProcessRegistry:
             raise FoundryError('witness_binding', 'Use the original registry and retained witness owner.')
         self._registry, self._provider = registry, provider
+        self._owner, self._busy = threading.current_thread(), False
         self._identity = _identity(identity)
         self._request = request_id
         state = registry.inspect()
@@ -68,23 +70,44 @@ class SessionWitness:
             self._resolution(status, allow_pending=True)
 
     @contextmanager
+    def _exclusive(self):
+        if threading.current_thread() is not self._owner or self._busy:
+            raise FoundryError('witness_busy', 'Use the original witness owner without reentry.')
+        self._busy = True
+        try:
+            yield
+        finally:
+            self._busy = False
+
+    @contextmanager
+    def guard_for_claim(self, registry):
+        """Exclude acquisition/recovery by this witness while reserving it."""
+        if registry is not self._registry:
+            raise FoundryError('witness_binding', 'Claim must use the original registry authority.')
+        with self._exclusive():
+            yield
+
+    @contextmanager
     def guard_for_dispatch(self, registry):
         """Hold the original provider and check live identity before dispatch."""
         if registry is not self._registry:
             raise FoundryError('witness_binding', 'Dispatch must use the original registry authority.')
-        with self._provider.guard_held(self._request, self._identity) as (status, check_live):
-            self._resolution(status, allow_pending=False)
-            check_live()
-            yield check_live
+        with self._exclusive():
+            with self._provider.guard_held(self._request, self._identity) as (status, check_live):
+                self._resolution(status, allow_pending=False)
+                check_live()
+                yield check_live
 
     def acquire(self):
-        self._registry.begin(self._request, 'acquire', self._intent)
-        lease = self._provider.acquire(self._request, deepcopy(self._identity))
-        self._complete()
-        return lease
+        with self._exclusive():
+            self._registry.begin(self._request, 'acquire', self._intent)
+            lease = self._provider.acquire(self._request, deepcopy(self._identity))
+            self._complete()
+            return lease
 
     def recover(self):
         """Reconcile only the same owner's existing handle; never open a PID."""
-        lease = self._provider.recover(self._request, deepcopy(self._identity))
-        self._complete()
-        return lease
+        with self._exclusive():
+            lease = self._provider.recover(self._request, deepcopy(self._identity))
+            self._complete()
+            return lease
