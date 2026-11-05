@@ -11,6 +11,8 @@ dependencies = []
 
 [project.scripts]
 foundry-game = "sims4foundry_cli.cli:main"
+foundry-record = "sims4foundry_cli.wgc_record_cli:main"
+foundry-readback = "sims4foundry_cli.visual_readback:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
