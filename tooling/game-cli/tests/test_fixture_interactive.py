@@ -24,6 +24,14 @@ SESSION, OWNER, SECRET = 'a' * 32, 'b' * 32, b's' * 32
 
 
 class Checks(unittest.TestCase):
+    def setUp(self):
+        if not hasattr(ctypes,'get_last_error'):
+            state = {'error':0}
+            for item in (patch.object(ctypes,'set_last_error',side_effect=lambda value:state.update(error=value),create=True),
+                         patch.object(ctypes,'get_last_error',side_effect=lambda:state['error'],create=True)):
+                item.start()
+                self.addCleanup(item.stop)
+
     def test_only_confirmed_preconnect_timeout_rearms(self):
         class Pipe:
             _uncertain = []

@@ -18,6 +18,11 @@ file. The authority's initialization and reservation can be incomplete after
 interruption or a lost acknowledgment. Do not recreate an uncertain
 authority or replay an uncertain claim. There is no qualified retirement or
 restart-recovery procedure.
+An initialized authority or a missing/inaccessible reservation does not prove
+that an earlier independent authority sent no input. The reservation API
+currently accepts caller-supplied binding data and does not itself prove the
+actual retained owner, journal or registry. Reconcile all prior authorities and
+bind the live owner before considering admission.
 
 Owned synthetic-directory tests cover two concurrent callers, two separate
 Python processes, changed target identity, a lost claim reply and malformed
