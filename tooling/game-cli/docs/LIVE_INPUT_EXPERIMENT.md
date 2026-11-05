@@ -48,6 +48,15 @@ input. `input_frame_evidence.inspect` is a read-only Python API that inspects
 the original journal and evidence directory, reporting missing files or a
 matching set. It neither resolves the journal nor restores an incomplete
 sender binding; there is no qualified recovery protocol yet.
+For a lost journal return only, experimental
+`registered_input.reconcile_frame_binding` can restore the in-memory frame
+binding when the original sender, recorder and live witness are still held,
+the journal is already awaiting readback, and the same registry attempt is
+observed pending. It sends no packets and does not resolve the journal. It
+cannot recover a failed admission, missing result, changed recorder, lost
+owner or process restart. The journal and registry checks are cooperative,
+path-based observations rather than an atomic snapshot; this is not a
+game-qualified recovery protocol.
 The read-only inspection and pixel comparison are also available without the
 session owner through these installed commands (they never send input):
 

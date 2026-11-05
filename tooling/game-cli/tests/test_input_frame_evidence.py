@@ -39,7 +39,8 @@ class InputFrameEvidenceTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.history = input_journal.InputJournal.create(self.root/'journal','1'*32,identity())
         (self.root/'registry').mkdir()
-        self.registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,FakeAnchor())
+        self.anchor = FakeAnchor()
+        self.registry = SessionRegistry(self.root/'registry',identity(),b'k'*32,self.anchor)
         self.registry.open_session('1'*32,registered_input.journal_binding(self.history))
         self.provider = RetainedProcessRegistry(FakeWitnessApi(),lambda view:True)
         process = {key:identity()[key] for key in ('pid','creation_filetime','executable','executable_sha256')}
@@ -97,6 +98,63 @@ class InputFrameEvidenceTests(unittest.TestCase):
             with self.assertRaises(FoundryError): self.dispatch(backend)
         self.assertEqual([],self.api.posts)
         self.assertEqual('resolved',self.registry.inspect()['events'][-1]['kind'])
+    def test_same_owner_recovers_frame_binding_after_lost_journal_reply(self):
+        with self.backend() as backend:
+            original = self.history.execute_once
+            def lose_reply(*args, **kwargs):
+                original(*args, **kwargs)
+                raise OSError('lost fixture reply')
+            with mock.patch.object(self.history,'execute_once',side_effect=lose_reply):
+                with self.assertRaises(OSError): self.dispatch(backend)
+            self.assertEqual('awaiting_readback',self.history.status('2'*32)['state'])
+            posts = list(self.api.posts)
+            with self.assertRaises(FoundryError):
+                input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+            recovered = registered_input.reconcile_frame_binding(
+                self.registry,self.history,'2'*32,backend,witness=self.witness)
+            self.assertEqual('same_owner_frame_binding_available',recovered['state'])
+            self.assertFalse(recovered['input_sent'])
+            self.assertFalse(recovered['acknowledged'])
+            input_frame_evidence.capture(self.history,'2'*32,backend,self.root/'evidence')
+            self.assertEqual(posts,self.api.posts)
+            self.assertEqual('awaiting_readback',self.history.status('2'*32)['state'])
+    def test_recovery_refuses_foreign_sender_or_closed_witness(self):
+        with self.backend() as backend:
+            original = self.history.execute_once
+            def lose_reply(*args, **kwargs):
+                original(*args, **kwargs)
+                raise OSError('lost fixture reply')
+            with mock.patch.object(self.history,'execute_once',side_effect=lose_reply):
+                with self.assertRaises(OSError): self.dispatch(backend)
+            posts = list(self.api.posts)
+            with self.backend() as foreign:
+                with self.assertRaises(FoundryError):
+                    registered_input.reconcile_frame_binding(self.registry,self.history,'2'*32,foreign,witness=self.witness)
+            self.lease.close()
+            with self.assertRaises(FoundryError):
+                registered_input.reconcile_frame_binding(self.registry,self.history,'2'*32,backend,witness=self.witness)
+            self.assertEqual(posts,self.api.posts)
+    def test_failed_admission_cannot_recover_frame_binding(self):
+        with self.backend() as backend:
+            self.anchor.fail = 'before'
+            with self.assertRaises(FoundryError): self.dispatch(backend)
+            with self.assertRaises(FoundryError):
+                registered_input.reconcile_frame_binding(self.registry,self.history,'2'*32,backend,witness=self.witness)
+            self.assertEqual([],self.api.posts)
+    def test_recovery_requires_original_attempt_to_remain_pending(self):
+        with self.backend() as backend:
+            original = self.history.execute_once
+            def lose_reply(*args, **kwargs):
+                original(*args, **kwargs)
+                raise OSError('lost fixture reply')
+            with mock.patch.object(self.history,'execute_once',side_effect=lose_reply):
+                with self.assertRaises(OSError): self.dispatch(backend)
+            current = self.history.status('2'*32)
+            self.registry.resolve('2'*32,current['intent_sha256'],'a'*64,'acknowledged')
+            posts = list(self.api.posts)
+            with self.assertRaises(FoundryError):
+                registered_input.reconcile_frame_binding(self.registry,self.history,'2'*32,backend,witness=self.witness)
+            self.assertEqual(posts,self.api.posts)
     def test_frame_is_saved_without_acknowledging_or_claiming_causality(self):
         with self.backend() as backend:
             self.assertEqual('awaiting_readback',self.dispatch(backend)['state'])

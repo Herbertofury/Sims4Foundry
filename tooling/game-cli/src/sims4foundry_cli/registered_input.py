@@ -125,6 +125,40 @@ def execute_once(registry, journal, request_id, packets, backend, *, expected_ob
     return result
 
 
+def reconcile_frame_binding(registry, journal, request_id, backend, *, witness):
+    """Recover only an existing same-owner frame binding; never dispatch input.
+
+    This requires the original in-memory sender, recorder and witness. The
+    registry and path-based journal checks are cooperative observations, not
+    an atomic snapshot or protection against arbitrary code in this host.
+    """
+    if (type(backend) is not LiveInputBackend or type(witness) is not SessionWitness
+            or type(journal) is not input_journal.InputJournal or type(registry) is not SessionRegistry):
+        raise FoundryError('frame_binding', 'The original sender and witness are required.')
+    if not input_journal._token(request_id):
+        raise FoundryError('invalid_request', 'An exact original request ID is required.')
+    with witness.guard_for_dispatch(registry) as check_live:
+        with lock(journal.root / 'operation.lock'):
+            _check(registry, journal)
+            journal._verify()
+            status = journal._status(request_id)
+            if status['state'] != 'awaiting_readback':
+                raise FoundryError('input_unresolved', 'The original request is not awaiting readback.')
+            events = registry.inspect()['events']
+            attempt = events[-1] if events else None
+            if (type(attempt) is not dict or attempt.get('kind') != 'attempt'
+                    or attempt.get('operation') != 'input' or attempt.get('request_id') != request_id
+                    or attempt.get('intent_sha256') != status['intent_sha256']):
+                raise FoundryError('registry_pending', 'The original shared input attempt is not pending.')
+            binding = (journal_binding(journal),journal.session['session_id'],request_id,
+                       status['intent_sha256'],journal.session['target'])
+            backend._require_evidence_binding(*binding,completed=False)
+            check_live()
+            backend._complete_evidence_binding(*binding)
+    return {'state':'same_owner_frame_binding_available', 'input_sent':False,
+            'acknowledged':False, 'atomic_snapshot':False, 'game_qualified':False}
+
+
 def reconcile_acknowledged(registry, journal, request_id):
     """Bind an already written host acknowledgement; never performs input."""
     events = _check(registry, journal)
