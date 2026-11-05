@@ -400,8 +400,9 @@ class ExchangeScenarios:
         number = number if type(number) is int and 0 <= number <= 65535 else None
         policy = getattr(self.last_fixture, 'policy', None)
         server = list(getattr(policy, 'auth_stages', []))[-16:] if policy is not None else []
-        return 'fixture callback: kind=%s code=%s errno=%s client=%s server=%s' % (
-            kind, code, number, self.client_auth_stages[-16:], server)
+        server_codes = list(getattr(policy, 'auth_codes', []))[-16:] if policy is not None else []
+        return 'fixture callback: kind=%s code=%s errno=%s client=%s server=%s server_codes=%s' % (
+            kind, code, number, self.client_auth_stages[-16:], server, server_codes)
 
     def admit(self, message, ticket):
         self.admissions.append(self.records())
@@ -412,13 +413,14 @@ class ExchangeScenarios:
         peer = auth.SessionKeyPeer(KEY if key is None else key)
         def authorize(connection, deadline, view):
             self.before_auth.append(self.records())
-            self.client_auth_stages.append('start')
+            if len(self.client_auth_stages) < 64: self.client_auth_stages.append('start')
             try:
                 result = peer(connection, deadline, view)
             except Exception:
-                self.client_auth_stages.append('error')
+                if len(self.client_auth_stages) < 64: self.client_auth_stages.append('error')
                 raise
-            self.client_auth_stages.append('accepted' if result is True else 'refused')
+            if len(self.client_auth_stages) < 64:
+                self.client_auth_stages.append('accepted' if result is True else 'refused')
             return result
         def exchange(message, ticket):
             self.calls.append((message, ticket))

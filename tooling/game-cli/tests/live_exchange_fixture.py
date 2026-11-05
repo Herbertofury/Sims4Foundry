@@ -84,25 +84,30 @@ class FabricatedPolicy(transport.DenyHostPolicy):
         self.auth = peer_auth.SessionKeyPeer(KEY)
         self.submissions, self.admissions, self.disk = [], [], []
         self.auth_stages = []
+        self.auth_codes = []
+
+    def note(self, collection, value):
+        if len(collection) < 64:
+            collection.append(value)
 
     def authorize_listener(self, binding):
         return binding.session_id == SESSION and binding.process_epoch == EPOCH
 
     def authorize_peer(self, connection, peer, binding, deadline):
         # Existing four-frame protocol and hook remain unchanged.
-        self.auth_stages.append('start')
+        self.note(self.auth_stages, 'start')
         try:
             result = self.auth.authorize_peer(connection, peer, binding, deadline)
         except peer_auth.PeerAuthError:
-            self.auth_stages.append('auth_error')
+            self.note(self.auth_stages, 'auth_error')
             raise
         except OSError:
-            self.auth_stages.append('os_error')
+            self.note(self.auth_stages, 'os_error')
             raise
         except Exception:
-            self.auth_stages.append('other_error')
+            self.note(self.auth_stages, 'other_error')
             raise
-        self.auth_stages.append('accepted' if result is True else 'refused')
+        self.note(self.auth_stages, 'accepted' if result is True else 'refused')
         return result
 
     def allowed(self, item, binding):
@@ -159,6 +164,16 @@ class Fixture(object):
         self.fault, self.armed, self.closed = fault, fault is not None, False
         self.port = None
         self.auth_ready_fault = 0
+        original_require = peer_auth._require
+        def traced_require(condition, code='peer_auth_failed'):
+            if not condition:
+                allowed = {'auth_binding','auth_socket','auth_deadline','auth_random','auth_envelope',
+                           'auth_nonce','auth_proof','auth_truncated','auth_size','auth_depth',
+                           'peer_auth_failed'}
+                self.policy.note(self.policy.auth_codes, code if type(code) is str and code in allowed else 'other')
+            return original_require(condition, code)
+        self.trace_patch = patch.object(peer_auth, '_require', traced_require)
+        self.trace_patch.start()
         self.original_auth_send = peer_auth._send
         self.auth_patch = (patch.object(peer_auth, '_send', self.auth_send)
                            if fault in ('auth_missing_ready', 'auth_invalid_ready') else None)
@@ -229,6 +244,7 @@ class Fixture(object):
         owner = self.policy.owner
         return dict(messages=deepcopy(self.server.messages),
                     auth_stages=list(self.policy.auth_stages),
+                    auth_codes=list(self.policy.auth_codes),
                     submissions=len(self.policy.submissions), executions=len(self.executions),
                     reader_calls=len(self.harness.calls), auth_ready_fault=self.auth_ready_fault,
                     owner_only=(all(thread is owner for _, thread in self.executions)
@@ -250,6 +266,7 @@ class Fixture(object):
                 self.patch.stop()
             if self.auth_patch:
                 self.auth_patch.stop()
+            self.trace_patch.stop()
         if not clean:
             raise AssertionError('Owned fixture transport failed to shut down.')
         if self.server.worker_errors:
