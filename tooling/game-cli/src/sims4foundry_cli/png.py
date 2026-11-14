@@ -3,6 +3,7 @@
 CRC and decompression validation establish image integrity, not freshness,
 nonblank content, correct surface, or any semantic gameplay result.
 """
+import hashlib
 import struct
 import zlib
 from .errors import FoundryError
@@ -11,7 +12,7 @@ from .io import plain_path
 MAX_BYTES = 128 * 1024 * 1024
 
 
-def inspect_png(path):
+def inspect_png_evidence(path):
     path = plain_path(path)
     if not 57 <= path.stat().st_size <= MAX_BYTES:
         raise FoundryError("capture_invalid", "Capture is truncated or exceeds the image bound.")
@@ -84,4 +85,10 @@ def inspect_png(path):
         raise FoundryError("capture_invalid", "PNG image data size/end does not match.")
     if any(decoded[row * stride] > 4 for row in range(height)):
         raise FoundryError("capture_invalid", "PNG has an invalid row filter.")
-    return width, height
+    return {"width": width, "height": height, "bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def inspect_png(path):
+    evidence = inspect_png_evidence(path)
+    return evidence["width"], evidence["height"]
