@@ -62,7 +62,9 @@ class Fixture {
         if(args[1]=="double") CreateWindowExW(0,c.name,"Second synthetic fixture",0x10CF0000,50,50,320,240,
             IntPtr.Zero,IntPtr.Zero,instance,IntPtr.Zero);
         if(args[1]=="minimized") ShowWindow(h,6);
-        File.WriteAllText(args[0],h.ToInt64().ToString());
+        // Publish readiness only after the complete HWND text has been closed.
+        File.WriteAllText(args[0]+".pending",h.ToInt64().ToString());
+        File.Move(args[0]+".pending",args[0]);
         MSG msg;
         while(GetMessageW(out msg,IntPtr.Zero,0,0)>0) { TranslateMessage(ref msg); DispatchMessageW(ref msg); }
     }

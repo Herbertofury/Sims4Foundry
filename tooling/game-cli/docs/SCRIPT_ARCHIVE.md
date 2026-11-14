@@ -147,3 +147,7 @@ same-size metadata drift, bounded short reads and the same-handle view. The path
 replacement test is POSIX-only because Windows may reject replacing an open
 source file; it is not claimed as Windows filesystem qualification. Existing
 mod tests continue to cover path/CRC refusals and never-in-place staging.
+
+## Portable path ownership
+
+Member paths cannot claim both file and directory ownership (including case-folded Windows aliases and implied parent directories), regardless of entry order. A single directory terminator is allowed; repeated trailing separators are rejected rather than silently stripped. Explicit directory records alongside their children remain valid. CRC-valid fixture tests cover both orders and unchanged source bytes. This is structural validation only, not extraction, importability, game compatibility or malware qualification.
