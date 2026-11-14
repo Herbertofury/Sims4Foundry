@@ -96,7 +96,12 @@ def digest(value):
 
 
 def sha256(path):
-    with plain_path(path).open("rb") as stream:
+    path = plain_path(path)
+    if not stat.S_ISREG(path.stat().st_mode):
+        raise FoundryError("invalid_hash_file", "Hash input must be a regular file, not a stream or device.")
+    with path.open("rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise FoundryError("invalid_hash_file", "Opened hash input is not a regular file.")
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
