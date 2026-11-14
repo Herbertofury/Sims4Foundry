@@ -15,7 +15,7 @@ except ImportError:  # Preserve stored-only inspection on Python without zlib.
     zlib = None
 from .errors import FoundryError
 from .io import (digest, exact_fields, exact_int, external_path, new_json,
-                 plain_path, safe_relative)
+                 plain_path, safe_relative, sync_directory)
 
 MAX_ARTIFACT = 512 * 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
@@ -436,10 +436,22 @@ def stage(manifest, destination, execute=False):
             "artifact_count": len(manifest["artifacts"]), "game_modified": False, "installed": False}
     if not execute:
         return plan
+    # Flush new directory entries bottom-up before declaring complete. Include
+    # the existing ancestor that owns the first newly created directory.
+    directories = {destination}
+    parent = destination.parent
+    while not parent.exists():
+        directories.add(parent)
+        parent = parent.parent
+    directories.add(parent)
     destination.mkdir(parents=True, exist_ok=False)
     new_json(destination / "staging-intent.json", plan)
     for row in manifest["artifacts"]:
         target = plain_path(destination / "artifacts" / row["relative"])
+        parent = target.parent
+        while parent != destination:
+            directories.add(parent)
+            parent = parent.parent
         target.parent.mkdir(parents=True, exist_ok=True)
         with plain_path(row["source"]).open("rb") as src, target.open("xb") as dst:
             _copy_artifact(src, dst, row["bytes"])
@@ -447,6 +459,8 @@ def stage(manifest, destination, execute=False):
             os.fsync(dst.fileno())
         if target.stat().st_size != row["bytes"] or _hash_artifact(target, row["bytes"], "copy_changed") != row["sha256"]:
             raise FoundryError("copy_changed", "Copied artifact did not match. Staging is incomplete, not installable.", destination=str(destination))
+    for directory in sorted(directories, key=lambda path: (-len(path.parts), str(path))):
+        sync_directory(plain_path(directory))
     result = dict(plan, executed=True, staged=True)
     new_json(destination / "staging-complete.json", result)
     return result
