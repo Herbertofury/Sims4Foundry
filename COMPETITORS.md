@@ -43,3 +43,7 @@ Added **2026-11-12**. The sparse repository feature inventory remains a blocker 
 - [ ] Prove undo/save/reopen and unaffected-resource preservation before adding write interop.
 - [ ] Benchmark cold/warm indexing, preview and edit latency plus memory against current implementations.
 - [ ] Keep game/creator assets local, verify licenses separately for code and test data, and retain independent rollback.
+
+
+## Expanded tooling review and branch baseline (2026-11-14)
+The [creation, management and repair catalog](research/sims4-tooling-2026-11-14.md) expands the source/license review and records the existing bounded CLI in PR #6. Main is sparse, but substantial offline inspection and guarded staging work exists on feature branches. Reconcile those branches before replacing implementations. No runtime adoption or game acceptance is claimed by this documentation update.
