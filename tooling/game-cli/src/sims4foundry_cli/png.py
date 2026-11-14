@@ -23,6 +23,9 @@ def inspect_png(path):
     image = bytearray()
     shape = None
     ended = False
+    palette_seen = False
+    data_seen = False
+    data_ended = False
     while offset < len(raw):
         if offset + 12 > len(raw):
             raise FoundryError("capture_invalid", "PNG chunk is truncated.")
@@ -37,6 +40,8 @@ def inspect_png(path):
             raise FoundryError("capture_invalid", "PNG chunk CRC does not match.")
         if shape is None and kind != b"IHDR":
             raise FoundryError("capture_invalid", "PNG must begin with IHDR.")
+        if data_seen and kind != b"IDAT":
+            data_ended = True
         if kind == b"IHDR":
             if shape is not None or size != 13:
                 raise FoundryError("capture_invalid", "PNG has an invalid IHDR.")
@@ -50,14 +55,21 @@ def inspect_png(path):
             if expected > MAX_BYTES:
                 raise FoundryError("capture_invalid", "Decoded capture exceeds the image bound.")
             shape = width, height, stride, expected
+        elif kind == b"PLTE":
+            if palette_seen or data_seen or color in (0, 4) or not 3 <= size <= 768 or size % 3:
+                raise FoundryError("capture_invalid", "Invalid PNG palette size, format or order.")
+            palette_seen = True
         elif kind == b"IDAT":
+            if data_ended:
+                raise FoundryError("capture_invalid", "PNG image data chunks must be consecutive.")
+            data_seen = True
             image.extend(payload)
         elif kind == b"IEND":
             if size or end != len(raw):
                 raise FoundryError("capture_invalid", "Invalid PNG end marker/trailing data.")
             ended = True
             break
-        elif kind[0] & 32 == 0 and kind != b"PLTE":
+        elif kind[0] & 32 == 0:
             raise FoundryError("capture_invalid", "Unsupported critical PNG chunk.")
         offset = end
     if not ended or not shape or not image:
