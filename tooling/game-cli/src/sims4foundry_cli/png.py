@@ -32,6 +32,8 @@ def inspect_png_evidence(path):
             raise FoundryError("capture_invalid", "PNG chunk is truncated.")
         size = struct.unpack_from(">I", raw, offset)[0]
         kind = raw[offset+4:offset+8]
+        if any(not (65 <= value <= 90 or 97 <= value <= 122) for value in kind):
+            raise FoundryError("capture_invalid", "PNG chunk type must contain four ASCII letters.")
         end = offset + size + 12
         if end > len(raw):
             raise FoundryError("capture_invalid", "PNG chunk size exceeds its file.")
