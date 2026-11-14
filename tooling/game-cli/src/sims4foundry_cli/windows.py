@@ -178,12 +178,16 @@ def capture(identity, ffmpeg, expected_ffmpeg_sha256, destination, *, observer=i
         raise FoundryError("capture_timeout", "Capture timed out. No input was sent.", destination=str(destination)) from exc
     if result.returncode != 0 or not output.is_file():
         raise FoundryError("capture_failed", "WGC capture did not produce an image. No fallback or input was attempted.", returncode=result.returncode)
-    from .png import inspect_png
-    width, height = inspect_png(output)
+    from .png import inspect_png_evidence
+    image = inspect_png_evidence(output)
     after = observer(identity["pid"], identity["executable"], identity["executable_sha256"], identity["hwnd"])
     same_identity(fresh, after)
-    result = {"ok": True, "input_sent": False, "image": str(output), "image_sha256": sha256(output),
-              "width": width, "height": height, "identity": after, "semantic_state_verified": False,
+    # Identity inspection can take time. Bind the receipt to the validated
+    # bytes, not a later unvalidated hash of a concurrently replaced frame.
+    if inspect_png_evidence(output) != image:
+        raise FoundryError("capture_changed", "Capture changed during verification; no completion receipt was published.")
+    result = {"ok": True, "input_sent": False, "image": str(output), "image_sha256": image["sha256"],
+              "width": image["width"], "height": image["height"], "identity": after, "semantic_state_verified": False,
               "visual_review_required": True, "live_input_qualified": False,
               "capture_surface": "WGC window", "capture_geometry_qualified": False}
     new_json(destination / "capture-complete.json", result)

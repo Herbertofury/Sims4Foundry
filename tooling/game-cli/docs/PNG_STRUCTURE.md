@@ -7,3 +7,7 @@ Rules follow [W3C PNG Third Edition, critical-chunk ordering and PLTE](https://w
 Tiny generated regression fixtures include split data separated by text, duplicate/late/empty/misaligned/oversized palettes and forbidden grayscale palettes. Valid consecutive IDAT chunks, including empty chunks, a suggested truecolor palette, and trailing text remain accepted. Inputs are verified unchanged.
 
 These checks do not establish image freshness, correct window, game semantics, native capture acceptance or general PNG conformance. The game-control foundation remains unqualified for live deployment.
+
+## Receipt-to-image binding
+
+The image dimensions and SHA-256 now come from the same bounded bytes that passed PNG validation. After the process/window identity recheck, the capture reads and validates the frame again and requires identical evidence before publishing completion. A malformed or changed frame retains the intent and output but no completion marker. This detects ordinary drift during verification, not a hostile-filesystem snapshot or protection against later edits after the receipt.
