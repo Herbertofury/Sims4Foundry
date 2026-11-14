@@ -1,0 +1,9 @@
+# Capture PNG structure checks
+
+The bounded capture inspector now enforces consecutive IDAT chunks and validates optional PLTE placement, uniqueness, length and applicability to the supported pixel formats. CRC-valid data with a decompressible pixel stream is not sufficient to excuse malformed critical-chunk structure.
+
+Rules follow [W3C PNG Third Edition, critical-chunk ordering and PLTE](https://www.w3.org/TR/png-3/#11PLTE). The accepted subset remains non-interlaced 8-bit grayscale/truecolor, optionally with alpha; indexed-color support is not added.
+
+Tiny generated regression fixtures include split data separated by text, duplicate/late/empty/misaligned/oversized palettes and forbidden grayscale palettes. Valid consecutive IDAT chunks, including empty chunks, a suggested truecolor palette, and trailing text remain accepted. Inputs are verified unchanged.
+
+These checks do not establish image freshness, correct window, game semantics, native capture acceptance or general PNG conformance. The game-control foundation remains unqualified for live deployment.
