@@ -1,0 +1,34 @@
+# Integrated Sims 4 modding hubs
+
+Review date: 2026-11-14. This supplements the [individual-tool catalog](sims4-tooling-2026-11-14.md). Primary-source discovery only: upstream feature claims are not installed-tool acceptance or evidence of superiority. No tools installed, game data changed, upstream code copied or private fixtures published.
+
+## Evaluation priority
+Compare PlumbBuddy/LlamaLogic for diagnostics and interoperability, and Sims 4 Editor for authoring workflows. Keep Foundry's existing bounded CLI and active feature work as the baseline, rather than replacing it on README claims. The existing [PR #6](https://github.com/Herbertofury/Sims4Foundry/pull/6) remains separate and is not approved as qualified game control by this research. This documentation pass changes no Workbench or Apex implementation.
+
+## Sims 4
+
+| Existing hub | Verified upstream evidence | License / integration direction | Next concrete comparison |
+|---|---|---|---|
+| [PlumbBuddy](https://github.com/Llama-Logic/PlumbBuddy) and [runtime integration](https://github.com/Llama-Logic/PlumbBuddy/wiki/Runtime-Mod-Integration) | Desktop helper with documented opt-in runtime integration: global manifest, localization lookup, asynchronous work, relational storage and HTML/JS/CSS UI bridge. The bridge is player-authorized and has no Internet access. | MIT repo. Strong foundation candidate alongside LlamaLogic; runtime integration installs package/script files, so keep opt-in. Do not enable input interception by default. | Compare dependency/missing-component diagnosis on fixtures; test duplicate resources and localization winners; separately test runtime bridge in a disposable game profile. |
+| [Sims 4 Editor / SimsEdit](https://simsedit.com/) | Package/tuning/SimData/STBL/DDS editing, game-file and icon browsers, plus multiple Mods/Saves/Tray environments. Current download documentation says Windows-only, other ports pending. | App source/reuse license not established in this pass. External authoring tool and UX comparison, not assumed open source. | Compare one tuning+SimData edit and export/reopen round trip. Inspect environment switching and recovery on copied folders. |
+| [TS4MM](https://github.com/TrollingDEAD/The-Sims-4-Mod-Manager-TS4MM) | Broad management hub: package/script overlap diagnosis, Tray dependencies, reversible toggles, backups, crash diagnostics. | MIT. Source-review candidate, not installed/trusted merely because its README advertises safety. | Test false positives against deliberate override pairs, compression-equivalent resources and incomplete Tray bundles. Do not adopt its newest-file-wins or resource-removal heuristics as automatic repair policy. |
+| [SimsForge](https://github.com/Teyk0o/simsforge) | Tauri/Next desktop plus Express/PostgreSQL backend, CurseForge discovery, local import and community suspicious-mod reports. | Actual [LICENSE](https://github.com/Teyk0o/simsforge/blob/main/LICENSE) verified: CC BY-NC-SA 4.0. Noncommercial/share-alike restrictions mean this is not an unrestricted open-source foundation; reuse requires scope and compatibility review. | Compare catalog and installation design; keep API permissions and downloaded-content rights separate from code license. Community reports are not malware proof. |
+| [Mortar](https://github.com/Rethunk-Tech/mortar) | Multi-game profiles including Sims 4, rollback/share workflow, multiple providers; documented running-app CLI with JSON output. | AGPL-3.0; network-use obligations require review for reuse. Cross-platform reference candidate, not a general authoring editor. | Verify Sims-specific profile isolation, script depth and CLI commands with real copied fixtures; do not infer support from generic CLI examples. |
+| [TheSimsModManager](https://github.com/rodrifelix99/TheSimsModManager) | Cross-platform manager for several Sims games. | Upstream explicitly says source is readable/contributable but not reusable or redistributable under an open-source license. External/reference only. | Compare UX without copying restricted code. |
+| [Sims 4 Toolkit](https://sims4toolkit.com/) | Collection of authoring tools and libraries with source repositories, not a single all-purpose manager. | Evaluate each package's license separately. | Reuse package parsing/building components only after comparing against Foundry's existing reader/writer. |
+
+## What the unified workbenches should add
+
+1. A capability registry that distinguishes documented CLI, library API, GUI-only workflow, and unsupported action. Never promise a full CLI for a tool that has none.
+2. One job record tying exact source hashes, tool version, profile, arguments, output hashes, logs and rollback state together.
+3. A staged authoring/repair pipeline: diagnose → preview → copied-output mutation → independent validation → optional user-approved deployment. A reported overlap is not automatically a broken mod.
+4. Independent acceptance gates: source review, fixture tests, real-file tests, installed desktop tests, actual game tests. Keep each visible.
+5. License/maintenance records for each pinned component and redistributed asset. Public source availability is not permission to reuse it; GPL/AGPL components are not interchangeable with MIT components.
+
+
+## Verification and next experiment
+Root license files were checked for [PlumbBuddy (MIT)](https://github.com/Llama-Logic/PlumbBuddy/blob/main/LICENSE), [TS4MM (MIT)](https://github.com/TrollingDEAD/The-Sims-4-Mod-Manager-TS4MM/blob/main/LICENSE), [Mortar (AGPL-3.0)](https://github.com/Rethunk-Tech/mortar/blob/main/LICENSE), and [SimsForge (CC BY-NC-SA 4.0)](https://github.com/Teyk0o/simsforge/blob/main/LICENSE). TheSimsModManager's own README explicitly denies general source reuse/redistribution. SimsEdit's application source license remains unestablished; its [download documentation](https://simsedit.com/editor/download/) is the platform reference. Licenses for dependencies, embedded game material and user-created assets require separate review.
+
+Start with one disposable copied profile containing a valid package, deliberate override pair, missing dependency, corrupt archive and copied Tray bundle. Compare diagnostic outputs against Foundry's existing bounded scanner. Record exact versions, source hashes, expected/actual classifications, false positives, memory and elapsed time. Test any write operation only into staged output with original hashes and rollback retained. Do not enable runtime integration, input interception, downloads, automatic repair or profile sharing merely to inspect a tool.
+
+Retain source review, synthetic fixture, real-file, installed desktop and real-game outcomes as distinct states. Candidate APIs, transitive licenses, current release versions and performance remain to be measured before adoption. No claim of a universal CLI, safe malware scanner or automatic conflict repair follows from this survey.

@@ -47,3 +47,7 @@ Added **2026-11-12**. The sparse repository feature inventory remains a blocker 
 
 ## Expanded tooling review and branch baseline (2026-11-14)
 The [creation, management and repair catalog](research/sims4-tooling-2026-11-14.md) expands the source/license review and records the existing bounded CLI in PR #6. Main is sparse, but substantial offline inspection and guarded staging work exists on feature branches. Reconcile those branches before replacing implementations. No runtime adoption or game acceptance is claimed by this documentation update.
+
+
+## Integrated modding hubs (2026-11-14)
+The [integrated Sims 4 hub comparison](research/integrated-sims4-modding-hubs-2026-11-14.md) covers PlumbBuddy, SimsEdit, TS4MM, SimsForge, Mortar and TheSimsModManager alongside S4TK. It distinguishes MIT/AGPL components from restricted source and prioritizes bounded comparison, not untested adoption. SimsForge's verified CC BY-NC-SA license requires particular care.
