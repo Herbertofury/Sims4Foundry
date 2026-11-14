@@ -282,15 +282,26 @@ def _inspect_artifact(path, script_inspector=None):
                 rows = archive.infolist()
                 if not 1 <= len(rows) <= MAX_SCRIPT_ENTRIES or sum(row.file_size for row in rows) > 256 * 1024 * 1024:
                     raise FoundryError("archive_bounds", "Script archive exceeds entry or expanded-size bounds.")
-                names = set()
+                names, files, directories = set(), set(), set()
                 for row in rows:
                     # ZipInfo normalizes backslashes on Windows and truncates NUL.
                     # Inspect the original archived spelling, not its sanitized alias.
                     name = row.orig_filename
-                    if name != row.filename or not safe_relative(name.rstrip("/")):
+                    member_path = name[:-1] if row.is_dir() else name
+                    if name != row.filename or not safe_relative(member_path):
                         raise FoundryError("archive_path", "Script archive contains an unsafe member path.")
                     if name.casefold() in names:
                         raise FoundryError("archive_duplicate", "Script archive contains duplicate/case-colliding paths.")
+                    key = member_path.casefold()
+                    parents = {str(parent).casefold() for parent in PurePosixPath(member_path).parents
+                               if str(parent) != "."}
+                    if key in files or parents & files or (not row.is_dir() and key in directories):
+                        raise FoundryError("archive_path_conflict", "A script member path is both a file and a directory.")
+                    directories.update(parents)
+                    if row.is_dir():
+                        directories.add(key)
+                    else:
+                        files.add(key)
                     names.add(name.casefold())
                     if stat.S_ISLNK(row.external_attr >> 16) or row.flag_bits & 1:
                         raise FoundryError("archive_member", "Linked or encrypted members are not accepted.")
