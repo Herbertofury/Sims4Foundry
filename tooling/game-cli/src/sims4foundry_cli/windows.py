@@ -171,6 +171,10 @@ def capture(identity, ffmpeg, expected_ffmpeg_sha256, destination, *, observer=i
     command = [str(ffmpeg), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
                f"gfxcapture=hwnd={fresh['hwnd']}:max_framerate=30:capture_cursor=0:capture_border=0:display_border=0",
                "-vf", "hwdownload,format=bgra", "-frames:v", "1", str(output)]
+    # Process inspection and intent publication may outlast a helper update.
+    # Recheck the selected bytes at dispatch rather than trust the earlier pin.
+    if sha256(ffmpeg) != expected_ffmpeg_sha256:
+        raise FoundryError("capture_tool_identity", "Selected ffmpeg.exe changed before capture dispatch.")
     try:
         result = runner(command, capture_output=True, timeout=30, check=False,
                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))

@@ -11,3 +11,5 @@ These checks do not establish image freshness, correct window, game semantics, n
 ## Receipt-to-image binding
 
 The image dimensions and SHA-256 now come from the same bounded bytes that passed PNG validation. After the process/window identity recheck, the capture reads and validates the frame again and requires identical evidence before publishing completion. A malformed or changed frame retains the intent and output but no completion marker. This detects ordinary drift during verification, not a hostile-filesystem snapshot or protection against later edits after the receipt.
+
+The selected capture helper is also hash-rechecked immediately before runner dispatch, after identity inspection and intent publication. Ordinary replacement during those steps refuses without running the changed file. This is not an OS-held execution-image lease: hostile swapping between the final check and process creation is not qualified.
