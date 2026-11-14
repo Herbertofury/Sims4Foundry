@@ -52,3 +52,13 @@ class PngStructureTests(unittest.TestCase):
         middle = (chunk(b'PLTE', b'\0\0\0') + chunk(b'IDAT', data[:4]) + chunk(b'IDAT')
                   + chunk(b'IDAT', data[4:]) + chunk(b'tEXt', b'key\0value'))
         self.assertEqual(self.inspect(self.image(middle)), (1, 1))
+
+    def test_reject_nonletter_chunk_types_even_with_valid_crc(self):
+        data = chunk(b'IDAT', zlib.compress(b'\0\xff\0\xff\xff'))
+        for kind in (b't0Xt', b'tEX\0', b'\xffEXt', b't_Xt', b'1EXt'):
+            with self.subTest(kind=kind), self.assertRaises(FoundryError):
+                self.inspect(self.image(chunk(kind) + data))
+
+    def test_accept_unknown_ancillary_ascii_letters(self):
+        data = chunk(b'IDAT', zlib.compress(b'\0\xff\0\xff\xff'))
+        self.assertEqual(self.inspect(self.image(chunk(b'vpAg', b'opaque') + data)), (1, 1))
