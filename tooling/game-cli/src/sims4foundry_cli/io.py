@@ -78,7 +78,11 @@ def loads(raw):
 
 def read_json(path):
     path = plain_path(path)
+    if not stat.S_ISREG(path.stat().st_mode):
+        raise FoundryError("invalid_json_file", "JSON input must be a regular file, not a stream or device.")
     with path.open("rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise FoundryError("invalid_json_file", "Opened JSON input is not a regular file.")
         return loads(stream.read(MAX_JSON + 1))
 
 
